@@ -12,6 +12,7 @@ const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
+const screenshotSelectionService = require('../features/ask/screenshotSelectionService');
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -83,6 +84,15 @@ module.exports = {
     ipcMain.handle('ask:sendQuestionFromSummary', async (event, userPrompt) => await askService.sendMessage(userPrompt));
     ipcMain.handle('ask:toggleAskButton', async () => await askService.toggleAskButton());
     ipcMain.handle('ask:closeAskWindow',  async () => await askService.closeAskWindow());
+
+    // Private screenshot selector
+    ipcMain.on('screenshot-selection:started', event => screenshotSelectionService.handleSelectionStarted(event.sender));
+    ipcMain.on('screenshot-selection:complete', (event, rectangle) => {
+      screenshotSelectionService.completeSelection(event.sender, rectangle).catch(error => {
+        console.error('[FeatureBridge] Screenshot selection failed:', error);
+      });
+    });
+    ipcMain.on('screenshot-selection:cancel', event => screenshotSelectionService.cancelSelection(event.sender));
     
     // Listen
     ipcMain.handle('listen:sendMicAudio', async (event, { data, mimeType }) => await listenService.handleSendMicAudioContent(data, mimeType));

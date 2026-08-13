@@ -1,0 +1,9 @@
+- [ ] screenshots: do not move the main cursor
+- [ ] screenshots: do not hide the main cursor
+- [ ] screenshots: 
+- [ ] screenshots: maybe reverse the order of the answers?
+- [ ] screenshots: multi-screen questions
+- [ ] ask: auto-ask the last question
+- [ ] ask: language selection
+- [ ] answers: broken table formatting
+- [ ] answers: broken code formatting

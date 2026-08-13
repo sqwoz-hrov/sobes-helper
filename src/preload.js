@@ -170,6 +170,14 @@ contextBridge.exposeInMainWorld('api', {
     removeOnScrollResponseDown: (callback) => ipcRenderer.removeListener('aks:scrollResponseDown', callback)
   },
 
+  // Private screenshot area selector
+  screenshotSelection: {
+    selectionStarted: () => ipcRenderer.send('screenshot-selection:started'),
+    complete: (rectangle) => ipcRenderer.send('screenshot-selection:complete', rectangle),
+    cancel: () => ipcRenderer.send('screenshot-selection:cancel'),
+    onMouseDelta: (callback) => ipcRenderer.on('screenshot-selection:mouse-delta', (_event, delta) => callback(delta))
+  },
+
   // src/ui/listen/ListenView.js
   listenView: {
     // Window Management

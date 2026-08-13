@@ -9,8 +9,6 @@ window.pickleGlass = {
     stopCapture: listenCapture.stopCapture,
     isLinux: listenCapture.isLinux,
     isMacOS: listenCapture.isMacOS,
-    captureManualScreenshot: listenCapture.captureManualScreenshot,
-    getCurrentScreenshot: listenCapture.getCurrentScreenshot,
 };
 
 

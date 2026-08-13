@@ -2,6 +2,7 @@ const { globalShortcut, screen } = require('electron');
 const shortcutsRepository = require('./repositories');
 const internalBridge = require('../../bridge/internalBridge');
 const askService = require('../ask/askService');
+const screenshotSelectionService = require('../ask/screenshotSelectionService');
 
 
 class ShortcutsService {
@@ -251,11 +252,9 @@ class ShortcutsService {
                      };
                      break;
                 case 'manualScreenshot':
-                    callback = () => {
-                        if(mainWindow && !mainWindow.isDestroyed()) {
-                             mainWindow.webContents.executeJavaScript('window.captureManualScreenshot && window.captureManualScreenshot();');
-                        }
-                    };
+                    callback = () => screenshotSelectionService.startSelection().catch(error => {
+                        console.error('[Shortcuts] Failed to start screenshot selection:', error);
+                    });
                     break;
                 case 'previousResponse':
                     callback = () => sendToRenderer('navigate-previous-response');
