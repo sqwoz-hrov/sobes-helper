@@ -14,7 +14,7 @@ const getWindowPool = () => {
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
 const { getSystemPrompt } = require('../common/prompts/promptBuilder');
-const { screenshotSelectionPrompt } = require('../common/prompts/promptTemplates');
+const { screenshotSelectionPrompt, recentThemPrompt } = require('../common/prompts/promptTemplates');
 const modelStateService = require('../common/services/modelStateService');
 const { captureScreenshot } = require('./screenshotCapture');
 
@@ -121,6 +121,30 @@ class AskService {
         }
 
         return await this.sendMessage(screenshotSelectionPrompt, [], { screenshotBase64 });
+    }
+
+    /**
+     * Sends only the three most recent finalized transcript chunks spoken by
+     * the other participant through the normal Ask workflow.
+     *
+     * @returns {Promise<{success: boolean, response?: string, error?: string}>}
+     */
+    async sendRecentThemChunks() {
+        // Lazy loading keeps ListenService's window dependencies out of AskService
+        // initialization and avoids introducing a service import cycle.
+        const listenService = require('../listen/listenService');
+        const conversationHistory = listenService.getConversationHistory();
+        const recentThemChunks = conversationHistory
+            .filter(turn => typeof turn === 'string' && /^them:\s*/i.test(turn))
+            .slice(-3);
+
+        if (recentThemChunks.length === 0) {
+            console.warn('[AskService] No transcript chunks from Them are available.');
+            return { success: false, error: 'No transcript chunks from Them are available yet.' };
+        }
+
+        console.log(`[AskService] Sending ${recentThemChunks.length} recent Them transcript chunk(s).`);
+        return await this.sendMessage(recentThemPrompt, recentThemChunks);
     }
 
     /**

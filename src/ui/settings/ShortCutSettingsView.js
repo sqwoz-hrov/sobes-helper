@@ -7,6 +7,7 @@ const commonSystemShortcuts = new Set([
 
 const displayNameMap = {
     nextStep: 'Ask Anything',
+    askRecentThem: 'Answer Recent Them',
     moveUp: 'Move Up Window',
     moveDown: 'Move Down Window',
     scrollUp: 'Scroll Up Response',

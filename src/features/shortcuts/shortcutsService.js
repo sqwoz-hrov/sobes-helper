@@ -67,6 +67,7 @@ class ShortcutsService {
             toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
             toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
             nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
+            askRecentThem: isMac ? 'Cmd+Shift+A' : 'Ctrl+Shift+A',
             manualScreenshot: isMac ? 'Cmd+Shift+S' : 'Ctrl+Shift+S',
             previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
             nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
@@ -213,6 +214,15 @@ class ShortcutsService {
                     break;
                 case 'nextStep':
                     callback = () => askService.toggleAskButton(true);
+                    break;
+                case 'askRecentThem':
+                    callback = () => askService.sendRecentThemChunks().then(result => {
+                        if (!result.success) {
+                            console.warn(`[Shortcuts] Recent Them request was not sent: ${result.error}`);
+                        }
+                    }).catch(error => {
+                        console.error('[Shortcuts] Failed to send recent Them transcript chunks:', error);
+                    });
                     break;
                 case 'scrollUp':
                     callback = () => {

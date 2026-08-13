@@ -74,7 +74,7 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
               transcription: {
                 model: 'gpt-4o-transcribe',
                 prompt: config.prompt || '',
-                language: language || 'en'
+                language: language || 'ru'
               },
               turn_detection: {
                 type: 'server_vad',
