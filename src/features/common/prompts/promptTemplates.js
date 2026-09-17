@@ -2,7 +2,7 @@
 // selected screenshot. Replace this text with the exact prompt you want the model
 // to follow; the user does not need to type or submit anything.
 const screenshotSelectionPrompt = `Analyze the selected screenshot area.
-Answer any question or complete any task shown in the image, and explain the result clearly. Firstly, explain the main idea or ideas behind the solution and then show how it's done step by step and only then you can send in fully prepared code if needed. Code answer in JavaScript, text answer in Russian`
+Answer any question or complete any task shown in the image. If you're presented with code, find problems with it, and explain the result clearly. Firstly, send in fully prepared code if needed and then show how the task is done step by step and only then explain the main idea or ideas behind the solution . Code answer in Python and SQL, text answer in Russian`
 
 // Used by the recent-speaker shortcut. The transcript excerpts themselves are
 // supplied separately as conversation history so they retain their speaker labels.
