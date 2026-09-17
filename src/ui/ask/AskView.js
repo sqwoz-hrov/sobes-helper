@@ -1,5 +1,5 @@
 import { html, css, LitElement } from '../../ui/assets/lit-core-2.7.4.min.js';
-import { parser, parser_write, parser_end, default_renderer } from '../../ui/assets/smd.js';
+import { parser, parser_write, default_renderer } from '../../ui/assets/smd.js';
 
 export class AskView extends LitElement {
     static properties = {
@@ -138,6 +138,44 @@ export class AskView extends LitElement {
             padding: 2px 4px !important;
             border-radius: 3px !important;
             color: #ffd700 !important;
+            white-space: break-spaces !important;
+            overflow-wrap: anywhere !important;
+        }
+
+        .response-container table {
+            width: max-content;
+            min-width: 100%;
+            margin: 12px 0;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .response-container th,
+        .response-container td {
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            text-align: left;
+            vertical-align: top;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .response-container th {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.96);
+            font-weight: 600;
+        }
+
+        .response-container tbody tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.035);
+        }
+
+        .response-container > :first-child {
+            margin-top: 0;
+        }
+
+        .response-container > :last-child {
+            margin-bottom: 0;
         }
 
         .hljs-keyword {
@@ -531,29 +569,37 @@ export class AskView extends LitElement {
             outline: none;
         }
 
-        .response-line h1,
-        .response-line h2,
-        .response-line h3,
-        .response-line h4,
-        .response-line h5,
-        .response-line h6 {
+        .response-container h1,
+        .response-container h2,
+        .response-container h3,
+        .response-container h4,
+        .response-container h5,
+        .response-container h6 {
             color: rgba(255, 255, 255, 0.95);
             margin: 16px 0 8px 0;
             font-weight: 600;
+            line-height: 1.3;
         }
 
-        .response-line p {
+        .response-container h1 { font-size: 1.45em; }
+        .response-container h2 { font-size: 1.3em; }
+        .response-container h3 { font-size: 1.17em; }
+        .response-container h4,
+        .response-container h5,
+        .response-container h6 { font-size: 1em; }
+
+        .response-container p {
             margin: 8px 0;
             color: rgba(255, 255, 255, 0.9);
         }
 
-        .response-line ul,
-        .response-line ol {
+        .response-container ul,
+        .response-container ol {
             margin: 8px 0;
             padding-left: 20px;
         }
 
-        .response-line li {
+        .response-container li {
             margin: 4px 0;
             color: rgba(255, 255, 255, 0.9);
         }
@@ -582,12 +628,18 @@ export class AskView extends LitElement {
             padding: 0;
         }
 
-        .response-line blockquote {
+        .response-container blockquote {
             border-left: 3px solid rgba(255, 255, 255, 0.3);
             margin: 12px 0;
             padding: 8px 16px;
             background: rgba(255, 255, 255, 0.05);
             color: rgba(255, 255, 255, 0.8);
+        }
+
+        .response-container a {
+            color: #8be9fd;
+            text-decoration: underline;
+            text-underline-offset: 2px;
         }
 
         .empty-state {
@@ -842,15 +894,15 @@ export class AskView extends LitElement {
     async loadLibraries() {
         try {
             if (!window.marked) {
-                await this.loadScript('../../assets/marked-4.3.0.min.js');
+                await this.loadScript('../assets/marked-4.3.0.min.js');
             }
 
             if (!window.hljs) {
-                await this.loadScript('../../assets/highlight-11.9.0.min.js');
+                await this.loadScript('../assets/highlight-11.9.0.min.js');
             }
 
             if (!window.DOMPurify) {
-                await this.loadScript('../../assets/dompurify-3.0.7.min.js');
+                await this.loadScript('../assets/dompurify-3.0.7.min.js');
             }
 
             this.marked = window.marked;
@@ -1013,8 +1065,16 @@ export class AskView extends LitElement {
             return;
         }
         
-        // Set streaming markdown parser
-        this.renderStreamingMarkdown(responseContainer);
+        // Use the incremental renderer only while chunks are arriving. Once the
+        // response is complete, parse the whole document with marked. This is
+        // important for block constructs (especially tables and fenced code),
+        // whose meaning cannot always be known until the closing line arrives.
+        if (this.isStreaming) {
+            this.renderStreamingMarkdown(responseContainer);
+        } else {
+            this.renderFallbackContent(responseContainer);
+            this.resetStreamingParser();
+        }
 
         // After updating content, recalculate window height
         this.adjustWindowHeightThrottled();
@@ -1049,11 +1109,6 @@ export class AskView extends LitElement {
                 this.lastProcessedLength = currentText.length;
             }
 
-            // 스트리밍이 완료되면 파서 종료
-            if (!this.isStreaming && !this.isLoading) {
-                parser_end(this.smdParser);
-            }
-
             // 코드 하이라이팅 적용
             if (this.hljs) {
                 responseContainer.querySelectorAll('pre code').forEach(block => {
@@ -1079,8 +1134,9 @@ export class AskView extends LitElement {
         
         if (this.isLibrariesLoaded && this.marked && this.DOMPurify) {
             try {
-                // 마크다운 파싱
-                const parsedHtml = this.marked.parse(textToRender);
+                // Close a trailing fence for providers that omit it, then parse
+                // both Markdown and ordinary plain text through the same path.
+                const parsedHtml = this.marked.parse(this.fixIncompleteCodeBlocks(textToRender));
 
                 // DOMPurify로 정제
                 const cleanHtml = this.DOMPurify.sanitize(parsedHtml, {
@@ -1301,12 +1357,13 @@ export class AskView extends LitElement {
     updated(changedProperties) {
         super.updated(changedProperties);
     
-        // ✨ isLoading 또는 currentResponse가 변경될 때마다 뷰를 다시 그립니다.
-        if (changedProperties.has('isLoading') || changedProperties.has('currentResponse')) {
+        // isStreaming must trigger a final full-document render even when the
+        // last text chunk and the completion signal arrive in separate updates.
+        if (changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('isStreaming')) {
             this.renderContent();
         }
     
-        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse')) {
+        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('isStreaming')) {
             this.adjustWindowHeightThrottled();
         }
     
