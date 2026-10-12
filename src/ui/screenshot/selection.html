@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Select screenshot area</title>
+        <link rel="stylesheet" href="./selection.css" />
+    </head>
+    <body>
+        <div class="veil" aria-hidden="true"></div>
+        <div class="hint" role="status">Drag to select an area <span>Esc to cancel</span></div>
+        <div class="selection" aria-hidden="true">
+            <div class="dimensions"></div>
+        </div>
+        <div class="ghost-cursor" aria-hidden="true">
+            <div class="ghost-cursor__ring"></div>
+            <div class="ghost-cursor__dot"></div>
+            <div class="ghost-cursor__cross ghost-cursor__cross--horizontal"></div>
+            <div class="ghost-cursor__cross ghost-cursor__cross--vertical"></div>
+        </div>
+        <script src="./selection.js"></script>
+    </body>
+</html>

@@ -1,4 +1,3 @@
-const { BrowserWindow } = require('electron');
 const { createStreamingLLM } = require('../common/ai/factory');
 // Lazy require helper to avoid circular dependency issues
 const getWindowManager = () => require('../../window/windowManager');
@@ -15,109 +14,9 @@ const getWindowPool = () => {
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
 const { getSystemPrompt } = require('../common/prompts/promptBuilder');
-const path = require('node:path');
-const fs = require('node:fs');
-const os = require('os');
-const util = require('util');
-const execFile = util.promisify(require('child_process').execFile);
-const { desktopCapturer } = require('electron');
+const { screenshotSelectionPrompt, recentThemPrompt } = require('../common/prompts/promptTemplates');
 const modelStateService = require('../common/services/modelStateService');
-
-// Try to load sharp, but don't fail if it's not available
-let sharp;
-try {
-    sharp = require('sharp');
-    console.log('[AskService] Sharp module loaded successfully');
-} catch (error) {
-    console.warn('[AskService] Sharp module not available:', error.message);
-    console.warn('[AskService] Screenshot functionality will work with reduced image processing capabilities');
-    sharp = null;
-}
-let lastScreenshot = null;
-
-async function captureScreenshot(options = {}) {
-    if (process.platform === 'darwin') {
-        try {
-            const tempPath = path.join(os.tmpdir(), `screenshot-${Date.now()}.jpg`);
-
-            await execFile('screencapture', ['-x', '-t', 'jpg', tempPath]);
-
-            const imageBuffer = await fs.promises.readFile(tempPath);
-            await fs.promises.unlink(tempPath);
-
-            if (sharp) {
-                try {
-                    // Try using sharp for optimal image processing
-                    const resizedBuffer = await sharp(imageBuffer)
-                        .resize({ height: 384 })
-                        .jpeg({ quality: 80 })
-                        .toBuffer();
-
-                    const base64 = resizedBuffer.toString('base64');
-                    const metadata = await sharp(resizedBuffer).metadata();
-
-                    lastScreenshot = {
-                        base64,
-                        width: metadata.width,
-                        height: metadata.height,
-                        timestamp: Date.now(),
-                    };
-
-                    return { success: true, base64, width: metadata.width, height: metadata.height };
-                } catch (sharpError) {
-                    console.warn('Sharp module failed, falling back to basic image processing:', sharpError.message);
-                }
-            }
-            
-            // Fallback: Return the original image without resizing
-            console.log('[AskService] Using fallback image processing (no resize/compression)');
-            const base64 = imageBuffer.toString('base64');
-            
-            lastScreenshot = {
-                base64,
-                width: null, // We don't have metadata without sharp
-                height: null,
-                timestamp: Date.now(),
-            };
-
-            return { success: true, base64, width: null, height: null };
-        } catch (error) {
-            console.error('Failed to capture screenshot:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    try {
-        const sources = await desktopCapturer.getSources({
-            types: ['screen'],
-            thumbnailSize: {
-                width: 1920,
-                height: 1080,
-            },
-        });
-
-        if (sources.length === 0) {
-            throw new Error('No screen sources available');
-        }
-        const source = sources[0];
-        const buffer = source.thumbnail.toJPEG(70);
-        const base64 = buffer.toString('base64');
-        const size = source.thumbnail.getSize();
-
-        return {
-            success: true,
-            base64,
-            width: size.width,
-            height: size.height,
-        };
-    } catch (error) {
-        console.error('Failed to capture screenshot using desktopCapturer:', error);
-        return {
-            success: false,
-            error: error.message,
-        };
-    }
-}
+const { captureScreenshot } = require('./screenshotCapture');
 
 /**
  * @class
@@ -211,11 +110,49 @@ class AskService {
     }
 
     /**
+     * Sends a manually selected screenshot with the pre-written screenshot prompt.
+     * No text from the Ask input is used by this workflow.
+     *
+     * @param {string} screenshotBase64
+     */
+    async sendSelectedScreenshot(screenshotBase64) {
+        if (!screenshotBase64) {
+            return { success: false, error: 'The selected screenshot is empty.' };
+        }
+
+        return await this.sendMessage(screenshotSelectionPrompt, [], { screenshotBase64 });
+    }
+
+    /**
+     * Sends only the three most recent finalized transcript chunks spoken by
+     * the other participant through the normal Ask workflow.
+     *
+     * @returns {Promise<{success: boolean, response?: string, error?: string}>}
+     */
+    async sendRecentThemChunks() {
+        // Lazy loading keeps ListenService's window dependencies out of AskService
+        // initialization and avoids introducing a service import cycle.
+        const listenService = require('../listen/listenService');
+        const conversationHistory = listenService.getConversationHistory();
+        const recentThemChunks = conversationHistory
+            .filter(turn => typeof turn === 'string' && /^them:\s*/i.test(turn))
+            .slice(-3);
+
+        if (recentThemChunks.length === 0) {
+            console.warn('[AskService] No transcript chunks from Them are available.');
+            return { success: false, error: 'No transcript chunks from Them are available yet.' };
+        }
+
+        console.log(`[AskService] Sending ${recentThemChunks.length} recent Them transcript chunk(s).`);
+        return await this.sendMessage(recentThemPrompt, recentThemChunks);
+    }
+
+    /**
      * 
      * @param {string} userPrompt
      * @returns {Promise<{success: boolean, response?: string, error?: string}>}
      */
-    async sendMessage(userPrompt, conversationHistoryRaw=[]) {
+    async sendMessage(userPrompt, conversationHistoryRaw = [], options = {}) {
         internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
         this.state = {
             ...this.state,
@@ -249,7 +186,9 @@ class AskService {
             }
             console.log(`[AskService] Using model: ${modelInfo.model} for provider: ${modelInfo.provider}`);
 
-            const screenshotResult = await captureScreenshot({ quality: 'medium' });
+            const screenshotResult = options.screenshotBase64
+                ? { success: true, base64: options.screenshotBase64 }
+                : await captureScreenshot({ quality: 'medium' });
             const screenshotBase64 = screenshotResult.success ? screenshotResult.base64 : null;
 
             const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);

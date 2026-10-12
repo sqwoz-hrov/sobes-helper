@@ -89,6 +89,8 @@ npm run setup
 
 `Ctrl/Cmd + Enter` : ask AI using all your previous screen and audio
 
+`Ctrl/Cmd + Shift + A` : answer using the last three transcript chunks from Them
+
 `Ctrl/Cmd + Arrows` : move main window position
 
 ## Repo Activity

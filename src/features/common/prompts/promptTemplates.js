@@ -1,3 +1,16 @@
+// This is sent automatically as the user-message text alongside every manually
+// selected screenshot. Replace this text with the exact prompt you want the model
+// to follow; the user does not need to type or submit anything.
+const screenshotSelectionPrompt = `Analyze the selected screenshot area.
+Answer any question or complete any task shown in the image. If you're presented with code, find problems with it, and explain the result clearly. Firstly, send in fully prepared code if needed and then show how the task is done step by step and only then explain the main idea or ideas behind the solution . Code answer in Python and SQL, text answer in Russian`
+
+// Used by the recent-speaker shortcut. The transcript excerpts themselves are
+// supplied separately as conversation history so they retain their speaker labels.
+const recentThemPrompt = `Respond to the other person's latest question or request.
+Prioritize the newest transcript excerpt and use the earlier excerpts only as context.
+Give a direct, ready-to-use answer the user can say or act on. If there is no explicit question, suggest the most helpful response the user should give next. Answer in Russian`;
+// maybe like reverse the order?
+
 const profilePrompts = {
     interview: {
         intro: `You are the user's live-meeting co-pilot called Pickle, developed and created by Pickle. Prioritize only the most recent context from the conversation.`,
@@ -406,4 +419,6 @@ Provide only the exact words to say in **markdown format**. Focus on finding win
 
 module.exports = {
     profilePrompts,
+    screenshotSelectionPrompt,
+    recentThemPrompt,
 };

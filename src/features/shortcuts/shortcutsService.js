@@ -2,6 +2,7 @@ const { globalShortcut, screen } = require('electron');
 const shortcutsRepository = require('./repositories');
 const internalBridge = require('../../bridge/internalBridge');
 const askService = require('../ask/askService');
+const screenshotSelectionService = require('../ask/screenshotSelectionService');
 
 
 class ShortcutsService {
@@ -66,6 +67,7 @@ class ShortcutsService {
             toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
             toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
             nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
+            askRecentThem: isMac ? 'Cmd+Shift+A' : 'Ctrl+Shift+A',
             manualScreenshot: isMac ? 'Cmd+Shift+S' : 'Ctrl+Shift+S',
             previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
             nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
@@ -213,6 +215,15 @@ class ShortcutsService {
                 case 'nextStep':
                     callback = () => askService.toggleAskButton(true);
                     break;
+                case 'askRecentThem':
+                    callback = () => askService.sendRecentThemChunks().then(result => {
+                        if (!result.success) {
+                            console.warn(`[Shortcuts] Recent Them request was not sent: ${result.error}`);
+                        }
+                    }).catch(error => {
+                        console.error('[Shortcuts] Failed to send recent Them transcript chunks:', error);
+                    });
+                    break;
                 case 'scrollUp':
                     callback = () => {
                         const askWindow = this.windowPool.get('ask');
@@ -251,11 +262,9 @@ class ShortcutsService {
                      };
                      break;
                 case 'manualScreenshot':
-                    callback = () => {
-                        if(mainWindow && !mainWindow.isDestroyed()) {
-                             mainWindow.webContents.executeJavaScript('window.captureManualScreenshot && window.captureManualScreenshot();');
-                        }
-                    };
+                    callback = () => screenshotSelectionService.startSelection().catch(error => {
+                        console.error('[Shortcuts] Failed to start screenshot selection:', error);
+                    });
                     break;
                 case 'previousResponse':
                     callback = () => sendToRenderer('navigate-previous-response');

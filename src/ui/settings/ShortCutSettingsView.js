@@ -7,10 +7,12 @@ const commonSystemShortcuts = new Set([
 
 const displayNameMap = {
     nextStep: 'Ask Anything',
+    askRecentThem: 'Answer Recent Them',
     moveUp: 'Move Up Window',
     moveDown: 'Move Down Window',
     scrollUp: 'Scroll Up Response',
     scrollDown: 'Scroll Down Response',
+    manualScreenshot: 'Select Screenshot Area',
   };
 
 export class ShortcutSettingsView extends LitElement {

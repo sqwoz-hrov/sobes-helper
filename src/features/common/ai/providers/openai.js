@@ -52,12 +52,10 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
   const headers = keyType === 'apiKey'
     ? {
         'Authorization': `Bearer ${key}`,
-        'OpenAI-Beta': 'realtime=v1',
       }
     : {
         'x-portkey-api-key': 'gRv2UGRMq6GGLJ8aVEB4e7adIewu',
         'x-portkey-virtual-key': key,
-        'OpenAI-Beta': 'realtime=v1',
       };
 
   const ws = new WebSocket(wsUrl, { headers });
@@ -67,22 +65,27 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
       console.log("WebSocket session opened.");
 
       const sessionConfig = {
-        type: 'transcription_session.update',
+        type: 'session.update',
         session: {
-          input_audio_format: 'pcm16',
-          input_audio_transcription: {
-            model: 'gpt-4o-mini-transcribe',
-            prompt: config.prompt || '',
-            language: language || 'en'
-          },
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.5,
-            prefix_padding_ms: 200,
-            silence_duration_ms: 100,
-          },
-          input_audio_noise_reduction: {
-            type: 'near_field'
+          type: 'transcription',
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              transcription: {
+                model: 'gpt-4o-transcribe',
+                prompt: config.prompt || '',
+                language: language || 'ru'
+              },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 200,
+                silence_duration_ms: 100,
+              },
+              noise_reduction: {
+                type: 'near_field'
+              }
+            }
           }
         }
       };
