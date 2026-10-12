@@ -47,6 +47,32 @@ const LATEST_SCHEMA = {
             { name: 'sync_state', type: 'TEXT DEFAULT \'clean\'' }
         ]
     },
+    ask_contexts: {
+        columns: [
+            { name: 'id', type: 'TEXT PRIMARY KEY' },
+            { name: 'session_id', type: 'TEXT NOT NULL' },
+            { name: 'uid', type: 'TEXT NOT NULL' },
+            { name: 'source_type', type: 'TEXT NOT NULL' },
+            { name: 'question', type: 'TEXT NOT NULL' },
+            { name: 'source_payload_json', type: 'TEXT' },
+            { name: 'title', type: 'TEXT NOT NULL' },
+            { name: 'status', type: 'TEXT NOT NULL' },
+            { name: 'created_at', type: 'INTEGER NOT NULL' },
+            { name: 'updated_at', type: 'INTEGER NOT NULL' }
+        ]
+    },
+    ask_context_messages: {
+        columns: [
+            { name: 'id', type: 'TEXT PRIMARY KEY' },
+            { name: 'context_id', type: 'TEXT NOT NULL' },
+            { name: 'sequence', type: 'INTEGER NOT NULL' },
+            { name: 'role', type: 'TEXT NOT NULL' },
+            { name: 'content', type: 'TEXT NOT NULL' },
+            { name: 'model', type: 'TEXT' },
+            { name: 'sent_at', type: 'INTEGER NOT NULL' }
+        ],
+        constraints: ['UNIQUE (context_id, sequence)']
+    },
     summaries: {
         columns: [
             { name: 'session_id', type: 'TEXT PRIMARY KEY' },
@@ -117,4 +143,4 @@ const LATEST_SCHEMA = {
     }
 };
 
-module.exports = LATEST_SCHEMA; 
+module.exports = LATEST_SCHEMA;

@@ -17,6 +17,9 @@ const screenshotSelectionService = require('../features/ask/screenshotSelectionS
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
   initialize() {
+    askService.initialize().catch(error => {
+      console.warn('[FeatureBridge] Ask service initialization failed:', error.message);
+    });
     // Settings Service
     ipcMain.handle('settings:getPresets', async () => await settingsService.getPresets());
     ipcMain.handle('settings:get-auto-update', async () => await settingsService.getAutoUpdateSetting());
@@ -80,7 +83,12 @@ module.exports = {
     ipcMain.handle('ollama:shutdown', async (event, force = false) => await ollamaService.handleShutdown(force));
 
     // Ask
-    ipcMain.handle('ask:sendQuestionFromAsk', async (event, userPrompt) => await askService.sendMessage(userPrompt));
+    ipcMain.handle('ask:getState', () => askService.getState());
+    ipcMain.handle('ask:selectContext', (event, contextId) => askService.selectContext(contextId));
+    ipcMain.handle('ask:sendQuestionFromAsk', async (event, payload) => {
+      if (typeof payload === 'string') return await askService.sendMessage(payload);
+      return await askService.sendMessage(payload?.text || '', [], { contextId: payload?.contextId || null });
+    });
     ipcMain.handle('ask:sendQuestionFromSummary', async (event, userPrompt) => await askService.sendMessage(userPrompt));
     ipcMain.handle('ask:toggleAskButton', async () => await askService.toggleAskButton());
     ipcMain.handle('ask:closeAskWindow',  async () => await askService.closeAskWindow());

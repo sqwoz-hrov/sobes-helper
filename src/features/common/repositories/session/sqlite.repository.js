@@ -39,6 +39,11 @@ function deleteWithRelatedData(id) {
         db.prepare("DELETE FROM transcripts WHERE session_id = ?").run(id);
         db.prepare("DELETE FROM ai_messages WHERE session_id = ?").run(id);
         db.prepare("DELETE FROM summaries WHERE session_id = ?").run(id);
+        db.prepare(`
+            DELETE FROM ask_context_messages
+            WHERE context_id IN (SELECT id FROM ask_contexts WHERE session_id = ?)
+        `).run(id);
+        db.prepare("DELETE FROM ask_contexts WHERE session_id = ?").run(id);
         db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     });
     
@@ -135,4 +140,4 @@ module.exports = {
     touch,
     getOrCreateActive,
     endAllActiveSessions,
-}; 
+};

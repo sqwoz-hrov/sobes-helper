@@ -198,6 +198,30 @@ function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxT
   }
 }
 
+function toGeminiParts(content) {
+  const inputParts = Array.isArray(content) ? content : [content]
+  return inputParts.map((part) => {
+    if (typeof part === "string") return { text: part }
+    if (part?.type === "text") return { text: part.text }
+    if (part?.type === "image_url" && part.image_url?.url) {
+      const [metadata, data = ""] = part.image_url.url.split(",")
+      const mimeType = metadata.match(/^data:([^;]+)/)?.[1] || "image/jpeg"
+      return { inlineData: { mimeType, data } }
+    }
+    if (part?.inlineData) return { inlineData: part.inlineData }
+    return { text: String(part ?? "") }
+  })
+}
+
+function convertMessagesToGeminiContents(messages) {
+  return messages
+    .filter(message => message.role !== "system")
+    .map(message => ({
+      role: message.role === "user" ? "user" : "model",
+      parts: toGeminiParts(message.content),
+    }))
+}
+
 /**
  * Creates a Gemini streaming LLM instance with text response fix
  */
@@ -243,45 +267,8 @@ function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 
       const stream = new ReadableStream({
         async start(controller) {
           try {
-            const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
-            let geminiContent = []
-
-            if (Array.isArray(lastMessage.content)) {
-              for (const part of lastMessage.content) {
-                if (typeof part === "string") {
-                  geminiContent.push(part)
-                } else if (part.type === "text") {
-                  geminiContent.push(part.text)
-                } else if (part.type === "image_url" && part.image_url) {
-                  const base64Data = part.image_url.url.split(",")[1]
-                  geminiContent.push({
-                    inlineData: {
-                      mimeType: "image/png",
-                      data: base64Data,
-                    },
-                  })
-                }
-              }
-            } else {
-              geminiContent = [lastMessage.content]
-            }
-
-            const contentParts = geminiContent.map((part) => {
-              if (typeof part === "string") {
-                return { text: part }
-              } else if (part.inlineData) {
-                return { inlineData: part.inlineData }
-              }
-              return part
-            })
-
             const result = await geminiModel.generateContentStream({
-              contents: [
-                {
-                  role: "user",
-                  parts: contentParts,
-                },
-              ],
+              contents: convertMessagesToGeminiContents(nonSystemMessages),
             })
 
             for await (const chunk of result.stream) {
@@ -324,5 +311,6 @@ module.exports = {
     GeminiProvider,
     createSTT,
     createLLM,
-    createStreamingLLM
+    createStreamingLLM,
+    convertMessagesToGeminiContents,
 };

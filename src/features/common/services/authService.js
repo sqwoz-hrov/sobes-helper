@@ -64,6 +64,7 @@ class AuthService {
                     this.currentUserMode = 'firebase';
 
                     // Clean up any zombie sessions from a previous run for this user.
+                    await require('../../ask/askService').endAllContextSessions();
                     await sessionRepository.endAllActiveSessions();
 
                     // ** Initialize encryption key for the logged-in user if permissions are already granted **
@@ -108,6 +109,7 @@ class AuthService {
                     this.currentUserMode = 'local';
 
                     // End active sessions for the local/default user as well.
+                    await require('../../ask/askService').endAllContextSessions();
                     await sessionRepository.endAllActiveSessions();
 
                     encryptionService.resetSessionKey();
@@ -154,6 +156,7 @@ class AuthService {
         const auth = getFirebaseAuth();
         try {
             // End all active sessions for the current user BEFORE signing out.
+            await require('../../ask/askService').endAllContextSessions();
             await sessionRepository.endAllActiveSessions();
 
             await signOut(auth);
@@ -208,4 +211,4 @@ class AuthService {
 }
 
 const authService = new AuthService();
-module.exports = authService; 
+module.exports = authService;

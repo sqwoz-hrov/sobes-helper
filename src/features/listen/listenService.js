@@ -238,8 +238,10 @@ class ListenService {
 
             // End database session
             if (this.currentSessionId) {
-                await sessionRepository.end(this.currentSessionId);
-                console.log(`[DB] Session ${this.currentSessionId} ended.`);
+                const endedSessionId = this.currentSessionId;
+                await sessionRepository.end(endedSessionId);
+                await require('../ask/askService').endSession(endedSessionId);
+                console.log(`[DB] Session ${endedSessionId} ended.`);
             }
 
             // Reset state

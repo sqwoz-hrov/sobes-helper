@@ -263,6 +263,7 @@ app.on('before-quit', async (event) => {
         
         // 2. End all active sessions (database operations) - with error handling
         try {
+            await askService.endAllContextSessions();
             await sessionRepository.endAllActiveSessions();
             console.log('[Shutdown] Active sessions ended');
         } catch (dbError) {

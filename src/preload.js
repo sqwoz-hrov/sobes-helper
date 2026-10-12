@@ -151,11 +151,15 @@ contextBridge.exposeInMainWorld('api', {
     adjustWindowHeight: (winName, height) => ipcRenderer.invoke('adjust-window-height', { winName, height }),
     
     // Message Handling
-    sendMessage: (text) => ipcRenderer.invoke('ask:sendQuestionFromAsk', text),
+    getState: () => ipcRenderer.invoke('ask:getState'),
+    selectContext: (contextId) => ipcRenderer.invoke('ask:selectContext', contextId),
+    sendMessage: (text, contextId = null) => ipcRenderer.invoke('ask:sendQuestionFromAsk', { text, contextId }),
 
     // Listeners
     onAskStateUpdate: (callback) => ipcRenderer.on('ask:stateUpdate', callback),
     removeOnAskStateUpdate: (callback) => ipcRenderer.removeListener('ask:stateUpdate', callback),
+    onAskContextUpdate: (callback) => ipcRenderer.on('ask:contextUpdate', callback),
+    removeOnAskContextUpdate: (callback) => ipcRenderer.removeListener('ask:contextUpdate', callback),
 
     onAskStreamError: (callback) => ipcRenderer.on('ask-response-stream-error', callback),
     removeOnAskStreamError: (callback) => ipcRenderer.removeListener('ask-response-stream-error', callback),
@@ -164,10 +168,10 @@ contextBridge.exposeInMainWorld('api', {
     onShowTextInput: (callback) => ipcRenderer.on('ask:showTextInput', callback),
     removeOnShowTextInput: (callback) => ipcRenderer.removeListener('ask:showTextInput', callback),
     
-    onScrollResponseUp: (callback) => ipcRenderer.on('aks:scrollResponseUp', callback),
-    removeOnScrollResponseUp: (callback) => ipcRenderer.removeListener('aks:scrollResponseUp', callback),
-    onScrollResponseDown: (callback) => ipcRenderer.on('aks:scrollResponseDown', callback),
-    removeOnScrollResponseDown: (callback) => ipcRenderer.removeListener('aks:scrollResponseDown', callback)
+    onScrollResponseUp: (callback) => ipcRenderer.on('scroll-response-up', callback),
+    removeOnScrollResponseUp: (callback) => ipcRenderer.removeListener('scroll-response-up', callback),
+    onScrollResponseDown: (callback) => ipcRenderer.on('scroll-response-down', callback),
+    removeOnScrollResponseDown: (callback) => ipcRenderer.removeListener('scroll-response-down', callback)
   },
 
   // Private screenshot area selector

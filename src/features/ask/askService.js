@@ -1,8 +1,22 @@
+const crypto = require('node:crypto');
 const { createStreamingLLM } = require('../common/ai/factory');
-// Lazy require helper to avoid circular dependency issues
-const getWindowManager = () => require('../../window/windowManager');
 const internalBridge = require('../../bridge/internalBridge');
+const sessionRepository = require('../common/repositories/session');
+const askRepository = require('./repositories');
+const contextRepository = require('./repositories/context.sqlite.repository');
+const authService = require('../common/services/authService');
+const { getSystemPrompt } = require('../common/prompts/promptBuilder');
+const { screenshotSelectionPrompt, recentThemPrompt } = require('../common/prompts/promptTemplates');
+const modelStateService = require('../common/services/modelStateService');
+const { captureScreenshot } = require('./screenshotCapture');
+const { ContextScreenshotCache } = require('./contextScreenshotCache');
+const {
+    deriveContextTitle,
+    makePlaceholderTitle,
+    serializeContext,
+} = require('./contextUtils');
 
+const getWindowManager = () => require('../../window/windowManager');
 const getWindowPool = () => {
     try {
         return getWindowManager().windowPool;
@@ -11,97 +25,118 @@ const getWindowPool = () => {
     }
 };
 
-const sessionRepository = require('../common/repositories/session');
-const askRepository = require('./repositories');
-const { getSystemPrompt } = require('../common/prompts/promptBuilder');
-const { screenshotSelectionPrompt, recentThemPrompt } = require('../common/prompts/promptTemplates');
-const modelStateService = require('../common/services/modelStateService');
-const { captureScreenshot } = require('./screenshotCapture');
-
-/**
- * @class
- * @description
- */
 class AskService {
     constructor() {
         this.abortController = null;
-        this.state = {
+        this.contextControllers = new Map();
+        this.contextTasks = new Map();
+        this.contexts = new Map();
+        this.activeContextId = null;
+        this.currentSessionId = null;
+        this.screenshotCache = new ContextScreenshotCache();
+        this.state = this._emptyLegacyState();
+        console.log('[AskService] Service instance created.');
+    }
+
+    _emptyLegacyState() {
+        return {
             isVisible: false,
             isLoading: false,
             isStreaming: false,
             currentQuestion: '',
             currentResponse: '',
+            error: '',
             showTextInput: true,
         };
-        console.log('[AskService] Service instance created.');
+    }
+
+    async initialize() {
+        try {
+            await this.screenshotCache.cleanupAll();
+            console.log('[AskService] Removed stale context screenshot cache.');
+        } catch (error) {
+            console.warn('[AskService] Failed to remove stale screenshot cache:', error.message);
+        }
+    }
+
+    getState() {
+        return {
+            ...this.state,
+            activeContextId: this.activeContextId,
+            contexts: this._orderedContexts().map(serializeContext),
+        };
+    }
+
+    _orderedContexts() {
+        return Array.from(this.contexts.values()).sort((left, right) => {
+            if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt;
+            return right.id.localeCompare(left.id);
+        });
+    }
+
+    _sendToAskWindow(channel, payload) {
+        const askWindow = getWindowPool()?.get('ask');
+        if (askWindow && !askWindow.isDestroyed()) {
+            askWindow.webContents.send(channel, payload);
+        }
     }
 
     _broadcastState() {
-        const askWindow = getWindowPool()?.get('ask');
-        if (askWindow && !askWindow.isDestroyed()) {
-            askWindow.webContents.send('ask:stateUpdate', this.state);
-        }
+        this._sendToAskWindow('ask:stateUpdate', this.getState());
+    }
+
+    _broadcastContext(context) {
+        if (!this.contexts.has(context.id)) return;
+        this._sendToAskWindow('ask:contextUpdate', serializeContext(context));
+    }
+
+    _showAskWindow() {
+        internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
+        this.state.isVisible = true;
     }
 
     async toggleAskButton(inputScreenOnly = false) {
         const askWindow = getWindowPool()?.get('ask');
 
-        let shouldSendScreenOnly = false;
-        if (inputScreenOnly && this.state.showTextInput && askWindow && askWindow.isVisible()) {
-            shouldSendScreenOnly = true;
-            await this.sendMessage('', []);
+        if (inputScreenOnly && this.state.showTextInput && askWindow?.isVisible()) {
+            await this._sendLegacyMessage('', []);
             return;
         }
 
-        const hasContent = this.state.isLoading || this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
+        const hasContent = this.contexts.size > 0
+            || this.state.isLoading
+            || this.state.isStreaming
+            || Boolean(this.state.currentResponse);
 
-        if (askWindow && askWindow.isVisible() && hasContent) {
+        if (askWindow?.isVisible() && hasContent) {
             this.state.showTextInput = !this.state.showTextInput;
             this._broadcastState();
-        } else {
-            if (askWindow && askWindow.isVisible()) {
-                internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
-                this.state.isVisible = false;
-            } else {
-                console.log('[AskService] Showing hidden Ask window');
-                internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
-                this.state.isVisible = true;
-            }
-            if (this.state.isVisible) {
-                this.state.showTextInput = true;
-                this._broadcastState();
-            }
+            return;
         }
+
+        const visible = !askWindow?.isVisible();
+        internalBridge.emit('window:requestVisibility', { name: 'ask', visible });
+        this.state.isVisible = visible;
+        if (visible) this.state.showTextInput = true;
+        this._broadcastState();
     }
 
-    async closeAskWindow () {
-            if (this.abortController) {
-                this.abortController.abort('Window closed by user');
-                this.abortController = null;
-            }
-    
-            this.state = {
-                isVisible      : false,
-                isLoading      : false,
-                isStreaming    : false,
-                currentQuestion: '',
-                currentResponse: '',
-                showTextInput  : true,
-            };
-            this._broadcastState();
-    
-            internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
-    
-            return { success: true };
+    async closeAskWindow() {
+        if (this.abortController) {
+            this.abortController.abort('Window closed by user');
+            this.abortController = null;
         }
-    
+        for (const controller of this.contextControllers.values()) {
+            controller.abort('Window closed by user');
+        }
+        await Promise.allSettled(Array.from(this.contextTasks.values()));
 
-    /**
-     * 
-     * @param {string[]} conversationTexts
-     * @returns {string}
-     * @private
-     */
+        this.state = { ...this._emptyLegacyState(), isVisible: false };
+        this._broadcastState();
+        internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
+        return { success: true };
+    }
+
     _formatConversationForPrompt(conversationTexts) {
         if (!conversationTexts || conversationTexts.length === 0) {
             return 'No conversation history available.';
@@ -109,29 +144,19 @@ class AskService {
         return conversationTexts.slice(-30).join('\n');
     }
 
-    /**
-     * Sends a manually selected screenshot with the pre-written screenshot prompt.
-     * No text from the Ask input is used by this workflow.
-     *
-     * @param {string} screenshotBase64
-     */
     async sendSelectedScreenshot(screenshotBase64) {
         if (!screenshotBase64) {
             return { success: false, error: 'The selected screenshot is empty.' };
         }
-
-        return await this.sendMessage(screenshotSelectionPrompt, [], { screenshotBase64 });
+        return this._createContextAndSend({
+            sourceType: 'screenshot',
+            question: screenshotSelectionPrompt,
+            sourcePayload: { hasScreenshot: true },
+            screenshotBase64,
+        });
     }
 
-    /**
-     * Sends only the three most recent finalized transcript chunks spoken by
-     * the other participant through the normal Ask workflow.
-     *
-     * @returns {Promise<{success: boolean, response?: string, error?: string}>}
-     */
     async sendRecentThemChunks() {
-        // Lazy loading keeps ListenService's window dependencies out of AskService
-        // initialization and avoids introducing a service import cycle.
         const listenService = require('../listen/listenService');
         const conversationHistory = listenService.getConversationHistory();
         const recentThemChunks = conversationHistory
@@ -139,251 +164,448 @@ class AskService {
             .slice(-3);
 
         if (recentThemChunks.length === 0) {
-            console.warn('[AskService] No transcript chunks from Them are available.');
             return { success: false, error: 'No transcript chunks from Them are available yet.' };
         }
 
-        console.log(`[AskService] Sending ${recentThemChunks.length} recent Them transcript chunk(s).`);
-        return await this.sendMessage(recentThemPrompt, recentThemChunks);
+        return this._createContextAndSend({
+            sourceType: 'quick_ask',
+            question: recentThemPrompt,
+            sourcePayload: { conversationTexts: recentThemChunks },
+        });
     }
 
-    /**
-     * 
-     * @param {string} userPrompt
-     * @returns {Promise<{success: boolean, response?: string, error?: string}>}
-     */
+    async _createContextAndSend({ sourceType, question, sourcePayload, screenshotBase64 = null }) {
+        this._showAskWindow();
+        const sessionId = await sessionRepository.getOrCreateActive('ask');
+        await this._activateSession(sessionId);
+
+        const id = crypto.randomUUID();
+        const ordinal = this._orderedContexts().filter(context => context.sourceType === sourceType).length + 1;
+        const title = makePlaceholderTitle(sourceType, ordinal);
+        const now = Date.now();
+        const context = {
+            id,
+            sessionId,
+            uid: authService.getCurrentUserId(),
+            sourceType,
+            question,
+            sourcePayload: sourcePayload || {},
+            title,
+            status: 'loading',
+            error: '',
+            createdAt: now,
+            updatedAt: now,
+            messages: [],
+        };
+
+        contextRepository.createContext({
+            id,
+            sessionId,
+            uid: context.uid,
+            sourceType,
+            question,
+            sourcePayload: context.sourcePayload,
+            title,
+            status: context.status,
+        });
+
+        if (screenshotBase64) {
+            try {
+                await this.screenshotCache.save(sessionId, id, screenshotBase64);
+            } catch (error) {
+                context.status = 'error';
+                context.error = error.message;
+                contextRepository.updateContext(id, { status: context.status });
+                this.contexts.set(id, context);
+                this.activeContextId = id;
+                this._broadcastState();
+                return { success: false, contextId: id, error: error.message };
+            }
+        }
+
+        this.contexts.set(id, context);
+        this.activeContextId = id;
+        this.state.showTextInput = false;
+        const userMessage = this._saveContextMessage(context, 'user', question);
+        context.messages.push(userMessage);
+        this._broadcastState();
+
+        const result = await this._startContextTurn(context);
+        return { ...result, contextId: id };
+    }
+
+    async _activateSession(sessionId) {
+        if (!this.currentSessionId || this.currentSessionId === sessionId) {
+            this.currentSessionId = sessionId;
+            return;
+        }
+        await this.endSession(this.currentSessionId);
+        this.currentSessionId = sessionId;
+    }
+
+    _saveContextMessage(context, role, content, model = 'unknown', id = crypto.randomUUID()) {
+        const sequence = context.messages.length;
+        return contextRepository.addMessage({
+            id,
+            contextId: context.id,
+            sequence,
+            role,
+            content,
+            model,
+        });
+    }
+
     async sendMessage(userPrompt, conversationHistoryRaw = [], options = {}) {
-        internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
+        if (options.contextId) {
+            return this.sendContextMessage(options.contextId, userPrompt);
+        }
+        return this._sendLegacyMessage(userPrompt, conversationHistoryRaw, options);
+    }
+
+    async sendContextMessage(contextId, userPrompt) {
+        const context = this.contexts.get(contextId);
+        const prompt = String(userPrompt || '').trim();
+        if (!context) return { success: false, error: 'The selected context is no longer available.' };
+        if (!prompt) return { success: false, error: 'Enter a follow-up question.' };
+        if (this.contextControllers.has(contextId)) {
+            return { success: false, error: 'This context is already generating a response.' };
+        }
+
+        if (context.sourceType === 'screenshot') {
+            try {
+                await this.screenshotCache.readDataUrl(context.sessionId, context.id);
+            } catch {
+                context.status = 'error';
+                context.error = 'The original screenshot is no longer available for this context.';
+                contextRepository.updateContext(context.id, { status: context.status });
+                this._broadcastContext(context);
+                return { success: false, error: context.error };
+            }
+        }
+
+        this.activeContextId = contextId;
+        context.error = '';
+        context.status = 'loading';
+        context.updatedAt = Date.now();
+        const userMessage = this._saveContextMessage(context, 'user', prompt);
+        context.messages.push(userMessage);
+        contextRepository.updateContext(context.id, { status: context.status });
+        this.state.showTextInput = false;
+        this._broadcastState();
+        return this._startContextTurn(context);
+    }
+
+    _startContextTurn(context) {
+        const task = this._runContextTurn(context);
+        this.contextTasks.set(context.id, task);
+        const cleanup = () => {
+            if (this.contextTasks.get(context.id) === task) this.contextTasks.delete(context.id);
+        };
+        task.then(cleanup, cleanup);
+        return task;
+    }
+
+    async _buildContextProviderMessages(context) {
+        const conversationTexts = context.sourcePayload.conversationTexts || [];
+        const systemPrompt = getSystemPrompt(
+            'pickle_glass_analysis',
+            this._formatConversationForPrompt(conversationTexts),
+            false
+        );
+        let screenshotDataUrl = null;
+        if (context.sourceType === 'screenshot') {
+            screenshotDataUrl = await this.screenshotCache.readDataUrl(context.sessionId, context.id);
+        }
+
+        const messages = [{ role: 'system', content: systemPrompt }];
+        for (const message of context.messages) {
+            if (message.transient) continue;
+            const text = message.role === 'user' ? `User Request: ${message.content}` : message.content;
+            if (message.role === 'user' && message.sequence === 0 && screenshotDataUrl) {
+                messages.push({
+                    role: 'user',
+                    content: [
+                        { type: 'text', text },
+                        { type: 'image_url', image_url: { url: screenshotDataUrl } },
+                    ],
+                });
+            } else {
+                messages.push({ role: message.role, content: text });
+            }
+        }
+        return messages;
+    }
+
+    async _runContextTurn(context) {
+        const controller = new AbortController();
+        this.contextControllers.set(context.id, controller);
+        const { signal } = controller;
+        const assistantId = crypto.randomUUID();
+        const assistantMessage = {
+            id: assistantId,
+            sequence: context.messages.length,
+            role: 'assistant',
+            content: '',
+            model: 'unknown',
+            sentAt: Math.floor(Date.now() / 1000),
+            transient: true,
+        };
+        context.messages.push(assistantMessage);
+        let fullResponse = '';
+
+        try {
+            const modelInfo = await modelStateService.getCurrentModelInfo('llm');
+            if (!modelInfo?.apiKey) throw new Error('AI model or API key not configured.');
+            assistantMessage.model = modelInfo.model;
+            const messages = await this._buildContextProviderMessages(context);
+            context.status = 'streaming';
+            contextRepository.updateContext(context.id, { status: context.status });
+            this._broadcastContext(context);
+
+            fullResponse = await this._streamCompletion(messages, modelInfo, signal, token => {
+                assistantMessage.content += token;
+                fullResponse = assistantMessage.content;
+                context.updatedAt = Date.now();
+                this._broadcastContext(context);
+            });
+
+            context.status = signal.aborted ? 'interrupted' : 'complete';
+            return { success: !signal.aborted, response: fullResponse, error: signal.aborted ? String(signal.reason || 'Interrupted') : undefined };
+        } catch (error) {
+            if (signal.aborted) {
+                context.status = 'interrupted';
+                context.error = '';
+            } else {
+                context.status = 'error';
+                context.error = error.message || 'Unknown error occurred';
+            }
+            return { success: false, response: fullResponse, error: context.error || String(signal.reason || 'Interrupted') };
+        } finally {
+            this.contextControllers.delete(context.id);
+            const assistantIndex = context.messages.findIndex(message => message.id === assistantId);
+            if (fullResponse) {
+                const persisted = contextRepository.addMessage({
+                    id: assistantId,
+                    contextId: context.id,
+                    sequence: assistantMessage.sequence,
+                    role: 'assistant',
+                    content: fullResponse,
+                    model: assistantMessage.model,
+                });
+                context.messages[assistantIndex] = persisted;
+                if (context.messages.filter(message => message.role === 'assistant').length === 1) {
+                    context.title = deriveContextTitle(fullResponse, context.title);
+                }
+            } else if (assistantIndex >= 0) {
+                context.messages.splice(assistantIndex, 1);
+            }
+            context.updatedAt = Date.now();
+            contextRepository.updateContext(context.id, {
+                title: context.title,
+                status: context.status,
+            });
+            this._broadcastContext(context);
+        }
+    }
+
+    _createStreamingClient(modelInfo) {
+        return createStreamingLLM(modelInfo.provider, {
+            apiKey: modelInfo.apiKey,
+            model: modelInfo.model,
+            temperature: 0.7,
+            maxTokens: 2048,
+            usePortkey: modelInfo.provider === 'openai-glass',
+            portkeyVirtualKey: modelInfo.provider === 'openai-glass' ? modelInfo.apiKey : undefined,
+        });
+    }
+
+    async _streamCompletion(messages, modelInfo, signal, onToken) {
+        const client = this._createStreamingClient(modelInfo);
+        try {
+            const response = await client.streamChat(messages);
+            return await this._consumeStream(response.body.getReader(), signal, onToken);
+        } catch (error) {
+            const hasImage = messages.some(message => Array.isArray(message.content)
+                && message.content.some(part => part?.type === 'image_url'));
+            if (!hasImage || !this._isMultimodalError(error) || signal.aborted) throw error;
+            const textOnlyMessages = messages.map(message => ({
+                ...message,
+                content: Array.isArray(message.content)
+                    ? message.content.filter(part => part?.type === 'text').map(part => part.text).join('\n')
+                    : message.content,
+            }));
+            const fallbackResponse = await client.streamChat(textOnlyMessages);
+            return this._consumeStream(fallbackResponse.body.getReader(), signal, onToken);
+        }
+    }
+
+    async _consumeStream(reader, signal, onToken) {
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let response = '';
+        const abortReader = () => reader.cancel(signal.reason).catch(() => {});
+        signal.addEventListener('abort', abortReader, { once: true });
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const rawLine of lines) {
+                    const line = rawLine.trim();
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6);
+                    if (data === '[DONE]') return response;
+                    try {
+                        const token = JSON.parse(data).choices?.[0]?.delta?.content || '';
+                        if (token) {
+                            response += token;
+                            onToken(token);
+                        }
+                    } catch {
+                        // Ignore provider keepalives and incomplete event payloads.
+                    }
+                }
+            }
+            return response;
+        } finally {
+            signal.removeEventListener('abort', abortReader);
+        }
+    }
+
+    async _sendLegacyMessage(userPrompt, conversationHistoryRaw = [], options = {}) {
+        this._showAskWindow();
+        this.activeContextId = null;
         this.state = {
             ...this.state,
             isLoading: true,
             isStreaming: false,
             currentQuestion: userPrompt,
             currentResponse: '',
+            error: '',
             showTextInput: false,
         };
         this._broadcastState();
 
-        if (this.abortController) {
-            this.abortController.abort('New request received.');
-        }
+        if (this.abortController) this.abortController.abort('New legacy request received.');
         this.abortController = new AbortController();
         const { signal } = this.abortController;
-
-
         let sessionId;
+        let fullResponse = '';
 
         try {
-            console.log(`[AskService] 🤖 Processing message: ${userPrompt.substring(0, 50)}...`);
-
             sessionId = await sessionRepository.getOrCreateActive('ask');
+            await this._activateSession(sessionId);
+            this.state.showTextInput = false;
             await askRepository.addAiMessage({ sessionId, role: 'user', content: userPrompt.trim() });
-            console.log(`[AskService] DB: Saved user prompt to session ${sessionId}`);
-            
             const modelInfo = await modelStateService.getCurrentModelInfo('llm');
-            if (!modelInfo || !modelInfo.apiKey) {
-                throw new Error('AI model or API key not configured.');
-            }
-            console.log(`[AskService] Using model: ${modelInfo.model} for provider: ${modelInfo.provider}`);
+            if (!modelInfo?.apiKey) throw new Error('AI model or API key not configured.');
 
             const screenshotResult = options.screenshotBase64
                 ? { success: true, base64: options.screenshotBase64 }
                 : await captureScreenshot({ quality: 'medium' });
             const screenshotBase64 = screenshotResult.success ? screenshotResult.base64 : null;
-
-            const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);
-
-            const systemPrompt = getSystemPrompt('pickle_glass_analysis', conversationHistory, false);
-
+            const systemPrompt = getSystemPrompt(
+                'pickle_glass_analysis',
+                this._formatConversationForPrompt(conversationHistoryRaw),
+                false
+            );
+            const userContent = [{ type: 'text', text: `User Request: ${userPrompt.trim()}` }];
+            if (screenshotBase64) {
+                userContent.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` } });
+            }
             const messages = [
                 { role: 'system', content: systemPrompt },
-                {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: `User Request: ${userPrompt.trim()}` },
-                    ],
-                },
+                { role: 'user', content: userContent },
             ];
-
-            if (screenshotBase64) {
-                messages[1].content.push({
-                    type: 'image_url',
-                    image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` },
-                });
-            }
-            
-            const streamingLLM = createStreamingLLM(modelInfo.provider, {
-                apiKey: modelInfo.apiKey,
-                model: modelInfo.model,
-                temperature: 0.7,
-                maxTokens: 2048,
-                usePortkey: modelInfo.provider === 'openai-glass',
-                portkeyVirtualKey: modelInfo.provider === 'openai-glass' ? modelInfo.apiKey : undefined,
-            });
-
-            try {
-                const response = await streamingLLM.streamChat(messages);
-                const askWin = getWindowPool()?.get('ask');
-
-                if (!askWin || askWin.isDestroyed()) {
-                    console.error("[AskService] Ask window is not available to send stream to.");
-                    response.body.getReader().cancel();
-                    return { success: false, error: 'Ask window is not available.' };
-                }
-
-                const reader = response.body.getReader();
-                signal.addEventListener('abort', () => {
-                    console.log(`[AskService] Aborting stream reader. Reason: ${signal.reason}`);
-                    reader.cancel(signal.reason).catch(() => { /* 이미 취소된 경우의 오류는 무시 */ });
-                });
-
-                await this._processStream(reader, askWin, sessionId, signal);
-                return { success: true };
-
-            } catch (multimodalError) {
-                // 멀티모달 요청이 실패했고 스크린샷이 포함되어 있다면 텍스트만으로 재시도
-                if (screenshotBase64 && this._isMultimodalError(multimodalError)) {
-                    console.log(`[AskService] Multimodal request failed, retrying with text-only: ${multimodalError.message}`);
-                    
-                    // 텍스트만으로 메시지 재구성
-                    const textOnlyMessages = [
-                        { role: 'system', content: systemPrompt },
-                        {
-                            role: 'user',
-                            content: `User Request: ${userPrompt.trim()}`
-                        }
-                    ];
-
-                    const fallbackResponse = await streamingLLM.streamChat(textOnlyMessages);
-                    const askWin = getWindowPool()?.get('ask');
-
-                    if (!askWin || askWin.isDestroyed()) {
-                        console.error("[AskService] Ask window is not available for fallback response.");
-                        fallbackResponse.body.getReader().cancel();
-                        return { success: false, error: 'Ask window is not available.' };
-                    }
-
-                    const fallbackReader = fallbackResponse.body.getReader();
-                    signal.addEventListener('abort', () => {
-                        console.log(`[AskService] Aborting fallback stream reader. Reason: ${signal.reason}`);
-                        fallbackReader.cancel(signal.reason).catch(() => {});
-                    });
-
-                    await this._processStream(fallbackReader, askWin, sessionId, signal);
-                    return { success: true };
-                } else {
-                    // 다른 종류의 에러이거나 스크린샷이 없었다면 그대로 throw
-                    throw multimodalError;
-                }
-            }
-
-        } catch (error) {
-            console.error('[AskService] Error during message processing:', error);
-            this.state = {
-                ...this.state,
-                isLoading: false,
-                isStreaming: false,
-                showTextInput: true,
-            };
-            this._broadcastState();
-
-            const askWin = getWindowPool()?.get('ask');
-            if (askWin && !askWin.isDestroyed()) {
-                const streamError = error.message || 'Unknown error occurred';
-                askWin.webContents.send('ask-response-stream-error', { error: streamError });
-            }
-
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
-     * 
-     * @param {ReadableStreamDefaultReader} reader
-     * @param {BrowserWindow} askWin
-     * @param {number} sessionId 
-     * @param {AbortSignal} signal
-     * @returns {Promise<void>}
-     * @private
-     */
-    async _processStream(reader, askWin, sessionId, signal) {
-        const decoder = new TextDecoder();
-        let fullResponse = '';
-
-        try {
             this.state.isLoading = false;
             this.state.isStreaming = true;
             this._broadcastState();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n').filter(line => line.trim() !== '');
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.substring(6);
-                        if (data === '[DONE]') {
-                            return; 
-                        }
-                        try {
-                            const json = JSON.parse(data);
-                            const token = json.choices[0]?.delta?.content || '';
-                            if (token) {
-                                fullResponse += token;
-                                this.state.currentResponse = fullResponse;
-                                this._broadcastState();
-                            }
-                        } catch (error) {
-                        }
-                    }
-                }
+            fullResponse = await this._streamCompletion(messages, modelInfo, signal, token => {
+                this.state.currentResponse += token;
+                this._broadcastState();
+            });
+            return { success: !signal.aborted, response: fullResponse };
+        } catch (error) {
+            if (!signal.aborted) {
+                this.state.error = error.message || 'Unknown error occurred';
+                this._sendToAskWindow('ask-response-stream-error', { error: this.state.error });
             }
-        } catch (streamError) {
-            if (signal.aborted) {
-                console.log(`[AskService] Stream reading was intentionally cancelled. Reason: ${signal.reason}`);
-            } else {
-                console.error('[AskService] Error while processing stream:', streamError);
-                if (askWin && !askWin.isDestroyed()) {
-                    askWin.webContents.send('ask-response-stream-error', { error: streamError.message });
-                }
-            }
+            return { success: false, error: this.state.error || String(signal.reason || 'Interrupted') };
         } finally {
+            this.state.isLoading = false;
             this.state.isStreaming = false;
-            this.state.currentResponse = fullResponse;
+            this.state.currentResponse = fullResponse || this.state.currentResponse;
             this._broadcastState();
-            if (fullResponse) {
-                 try {
-                    await askRepository.addAiMessage({ sessionId, role: 'assistant', content: fullResponse });
-                    console.log(`[AskService] DB: Saved partial or full assistant response to session ${sessionId} after stream ended.`);
-                } catch(dbError) {
-                    console.error("[AskService] DB: Failed to save assistant response after stream ended:", dbError);
+            if (sessionId && this.state.currentResponse) {
+                try {
+                    await askRepository.addAiMessage({ sessionId, role: 'assistant', content: this.state.currentResponse });
+                } catch (error) {
+                    console.error('[AskService] Failed to save legacy assistant response:', error);
                 }
             }
         }
     }
 
-    /**
-     * 멀티모달 관련 에러인지 판단
-     * @private
-     */
-    _isMultimodalError(error) {
-        const errorMessage = error.message?.toLowerCase() || '';
-        return (
-            errorMessage.includes('vision') ||
-            errorMessage.includes('image') ||
-            errorMessage.includes('multimodal') ||
-            errorMessage.includes('unsupported') ||
-            errorMessage.includes('image_url') ||
-            errorMessage.includes('400') ||  // Bad Request often for unsupported features
-            errorMessage.includes('invalid') ||
-            errorMessage.includes('not supported')
-        );
+    selectContext(contextId) {
+        if (!this.contexts.has(contextId)) {
+            return { success: false, error: 'Context not found.' };
+        }
+        this.activeContextId = contextId;
+        this.state.showTextInput = false;
+        this._broadcastState();
+        return { success: true };
     }
 
+    navigateContext(direction) {
+        const contexts = this._orderedContexts();
+        if (contexts.length === 0) return { success: false, error: 'No contexts available.' };
+        let index = contexts.findIndex(context => context.id === this.activeContextId);
+        if (index < 0) index = 0;
+        const nextIndex = Math.max(0, Math.min(contexts.length - 1, index + direction));
+        return this.selectContext(contexts[nextIndex].id);
+    }
+
+    async endSession(sessionId = this.currentSessionId) {
+        if (!sessionId) return { success: true };
+        const pendingTasks = [];
+        for (const [contextId, controller] of this.contextControllers) {
+            const context = this.contexts.get(contextId);
+            if (context?.sessionId === sessionId) {
+                controller.abort('Session ended');
+                const task = this.contextTasks.get(contextId);
+                if (task) pendingTasks.push(task);
+            }
+        }
+        await Promise.allSettled(pendingTasks);
+        await this.screenshotCache.cleanupSession(sessionId).catch(error => {
+            console.warn('[AskService] Failed to clean screenshot session cache:', error.message);
+        });
+        for (const [id, context] of this.contexts) {
+            if (context.sessionId === sessionId) this.contexts.delete(id);
+        }
+        if (!this.contexts.has(this.activeContextId)) this.activeContextId = null;
+        if (this.currentSessionId === sessionId) this.currentSessionId = null;
+        if (this.contexts.size === 0) this.state.showTextInput = true;
+        this._broadcastState();
+        return { success: true };
+    }
+
+    async endAllContextSessions() {
+        const sessionIds = new Set(Array.from(this.contexts.values()).map(context => context.sessionId));
+        if (this.currentSessionId) sessionIds.add(this.currentSessionId);
+        for (const sessionId of sessionIds) {
+            await this.endSession(sessionId);
+        }
+        return { success: true };
+    }
+
+    _isMultimodalError(error) {
+        const message = error?.message?.toLowerCase() || '';
+        return ['vision', 'image', 'multimodal', 'unsupported', 'image_url', '400', 'invalid', 'not supported']
+            .some(fragment => message.includes(fragment));
+    }
 }
 
-const askService = new AskService();
-
-module.exports = askService;
+module.exports = new AskService();

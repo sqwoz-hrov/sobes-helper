@@ -267,10 +267,10 @@ class ShortcutsService {
                     });
                     break;
                 case 'previousResponse':
-                    callback = () => sendToRenderer('navigate-previous-response');
+                    callback = () => askService.navigateContext(1);
                     break;
                 case 'nextResponse':
-                    callback = () => sendToRenderer('navigate-next-response');
+                    callback = () => askService.navigateContext(-1);
                     break;
             }
             
