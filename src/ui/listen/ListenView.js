@@ -200,40 +200,10 @@ export class ListenView extends LitElement {
             gap: 4px;
             align-items: center;
             flex-shrink: 0;
-            width: 120px;
+            width: auto;
             justify-content: flex-end;
             box-sizing: border-box;
             padding: 4px;
-        }
-
-        .toggle-button {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            background: transparent;
-            color: rgba(255, 255, 255, 0.9);
-            border: none;
-            outline: none;
-            box-shadow: none;
-            padding: 4px 8px;
-            border-radius: 5px;
-            font-size: 11px;
-            font-weight: 500;
-            cursor: pointer;
-            height: 24px;
-            white-space: nowrap;
-            transition: background-color 0.15s ease;
-            justify-content: center;
-        }
-
-        .toggle-button:hover {
-            background: rgba(255, 255, 255, 0.1);
-        }
-
-        .toggle-button svg {
-            flex-shrink: 0;
-            width: 12px;
-            height: 12px;
         }
 
         .copy-button {
@@ -292,7 +262,6 @@ export class ListenView extends LitElement {
         /* ────────────────[ GLASS BYPASS ]─────────────── */
         :host-context(body.has-glass) .assistant-container,
         :host-context(body.has-glass) .top-bar,
-        :host-context(body.has-glass) .toggle-button,
         :host-context(body.has-glass) .copy-button,
         :host-context(body.has-glass) .transcription-container,
         :host-context(body.has-glass) .insights-container,
@@ -316,7 +285,6 @@ export class ListenView extends LitElement {
             display: none !important;
         }
 
-        :host-context(body.has-glass) .toggle-button:hover,
         :host-context(body.has-glass) .copy-button:hover,
         :host-context(body.has-glass) .outline-item:hover,
         :host-context(body.has-glass) .request-item.clickable:hover,
@@ -342,7 +310,6 @@ export class ListenView extends LitElement {
 
         :host-context(body.has-glass) .assistant-container,
         :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .toggle-button,
         :host-context(body.has-glass) .copy-button {
             border-radius: 0 !important;
         }
@@ -355,7 +322,6 @@ export class ListenView extends LitElement {
         }
         :host-context(body.has-glass) .assistant-container,
         :host-context(body.has-glass) .top-bar,
-        :host-context(body.has-glass) .toggle-button,
         :host-context(body.has-glass) .copy-button,
         :host-context(body.has-glass) .transcription-container,
         :host-context(body.has-glass) .insights-container,
@@ -379,7 +345,6 @@ export class ListenView extends LitElement {
             display: none !important;
         }
 
-        :host-context(body.has-glass) .toggle-button:hover,
         :host-context(body.has-glass) .copy-button:hover,
         :host-context(body.has-glass) .outline-item:hover,
         :host-context(body.has-glass) .request-item.clickable:hover,
@@ -405,7 +370,6 @@ export class ListenView extends LitElement {
 
         :host-context(body.has-glass) .assistant-container,
         :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .toggle-button,
         :host-context(body.has-glass) .copy-button {
             border-radius: 0 !important;
         }
@@ -419,24 +383,25 @@ export class ListenView extends LitElement {
     `;
 
     static properties = {
-        viewMode: { type: String },
         isHovering: { type: Boolean },
         isAnimating: { type: Boolean },
         copyState: { type: String },
         elapsedTime: { type: String },
         captureStartTime: { type: Number },
         isSessionActive: { type: Boolean },
+        isPaused: { type: Boolean },
         hasCompletedRecording: { type: Boolean },
     };
 
     constructor() {
         super();
         this.isSessionActive = false;
+        this.isPaused = false;
         this.hasCompletedRecording = false;
-        this.viewMode = 'insights';
         this.isHovering = false;
         this.isAnimating = false;
         this.elapsedTime = '00:00';
+        this.elapsedMilliseconds = 0;
         this.captureStartTime = null;
         this.timerInterval = null;
         this.adjustHeightThrottle = null;
@@ -454,25 +419,31 @@ export class ListenView extends LitElement {
             this.startTimer();
         }
         if (window.api) {
-            window.api.listenView.onSessionStateChanged((event, { isActive }) => {
-                const wasActive = this.isSessionActive;
-                this.isSessionActive = isActive;
+            window.api.listenView.onSessionStateChanged((event, payload) => {
+                const previousState = this.isPaused ? 'paused' : this.isSessionActive ? 'listening' : this.hasCompletedRecording ? 'stopped' : 'idle';
+                const state = payload.state || (payload.isActive ? 'listening' : 'stopped');
+                this.isSessionActive = state === 'listening';
+                this.isPaused = state === 'paused';
 
-                if (!wasActive && isActive) {
+                if (state === 'listening') {
                     this.hasCompletedRecording = false;
-                    this.startTimer();
-                    // Reset child components
-                    this.updateComplete.then(() => {
-                        const sttView = this.shadowRoot.querySelector('stt-view');
-                        const summaryView = this.shadowRoot.querySelector('summary-view');
-                        if (sttView) sttView.resetTranscript();
-                        if (summaryView) summaryView.resetAnalysis();
-                    });
+                    const isNewSession = previousState !== 'paused';
+                    this.startTimer(isNewSession);
+                    if (isNewSession) {
+                        this.updateComplete.then(() => {
+                            const sttView = this.shadowRoot.querySelector('stt-view');
+                            const summaryView = this.shadowRoot.querySelector('summary-view');
+                            if (sttView) sttView.resetTranscript();
+                            if (summaryView) summaryView.resetAnalysis();
+                        });
+                    }
                     this.requestUpdate();
-                }
-                if (wasActive && !isActive) {
+                } else if (state === 'paused') {
+                    this.stopTimer(true);
+                    this.requestUpdate();
+                } else if (state === 'stopped') {
                     this.hasCompletedRecording = true;
-                    this.stopTimer();
+                    this.stopTimer(true);
                     this.requestUpdate();
                 }
             });
@@ -492,10 +463,15 @@ export class ListenView extends LitElement {
         }
     }
 
-    startTimer() {
+    startTimer(reset = false) {
+        if (this.timerInterval) return;
+        if (reset) {
+            this.elapsedMilliseconds = 0;
+            this.elapsedTime = '00:00';
+        }
         this.captureStartTime = Date.now();
         this.timerInterval = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - this.captureStartTime) / 1000);
+            const elapsed = Math.floor((this.elapsedMilliseconds + Date.now() - this.captureStartTime) / 1000);
             const minutes = Math.floor(elapsed / 60)
                 .toString()
                 .padStart(2, '0');
@@ -505,11 +481,15 @@ export class ListenView extends LitElement {
         }, 1000);
     }
 
-    stopTimer() {
+    stopTimer(preserveElapsed = false) {
         if (this.timerInterval) {
+            if (preserveElapsed && this.captureStartTime) {
+                this.elapsedMilliseconds += Date.now() - this.captureStartTime;
+            }
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
+        this.captureStartTime = null;
     }
 
     adjustWindowHeight() {
@@ -518,9 +498,7 @@ export class ListenView extends LitElement {
         this.updateComplete
             .then(() => {
                 const topBar = this.shadowRoot.querySelector('.top-bar');
-                const activeContent = this.viewMode === 'transcript'
-                    ? this.shadowRoot.querySelector('stt-view')
-                    : this.shadowRoot.querySelector('summary-view');
+                const activeContent = this.shadowRoot.querySelector('stt-view');
 
                 if (!topBar || !activeContent) return;
 
@@ -533,7 +511,7 @@ export class ListenView extends LitElement {
                 const targetHeight = Math.min(700, idealHeight);
 
                 console.log(
-                    `[Height Adjusted] Mode: ${this.viewMode}, TopBar: ${topBarHeight}px, Content: ${contentHeight}px, Ideal: ${idealHeight}px, Target: ${targetHeight}px`
+                    `[Height Adjusted] Transcript, TopBar: ${topBarHeight}px, Content: ${contentHeight}px, Ideal: ${idealHeight}px, Target: ${targetHeight}px`
                 );
 
                 window.api.listenView.adjustWindowHeight('listen', targetHeight);
@@ -541,11 +519,6 @@ export class ListenView extends LitElement {
             .catch(error => {
                 console.error('Error in adjustWindowHeight:', error);
             });
-    }
-
-    toggleViewMode() {
-        this.viewMode = this.viewMode === 'insights' ? 'transcript' : 'insights';
-        this.requestUpdate();
     }
 
     handleCopyHover(isHovering) {
@@ -563,13 +536,8 @@ export class ListenView extends LitElement {
 
         let textToCopy = '';
 
-        if (this.viewMode === 'transcript') {
-            const sttView = this.shadowRoot.querySelector('stt-view');
-            textToCopy = sttView ? sttView.getTranscriptText() : '';
-        } else {
-            const summaryView = this.shadowRoot.querySelector('summary-view');
-            textToCopy = summaryView ? summaryView.getSummaryText() : '';
-        }
+        const sttView = this.shadowRoot.querySelector('stt-view');
+        textToCopy = sttView ? sttView.getTranscriptText() : '';
 
         try {
             await navigator.clipboard.writeText(textToCopy);
@@ -605,14 +573,6 @@ export class ListenView extends LitElement {
         }, 16);
     }
 
-    updated(changedProperties) {
-        super.updated(changedProperties);
-
-        if (changedProperties.has('viewMode')) {
-            this.adjustWindowHeight();
-        }
-    }
-
     handleSttMessagesUpdated(event) {
         // Handle messages update from SttView if needed
         this.adjustWindowHeightThrottled();
@@ -625,12 +585,12 @@ export class ListenView extends LitElement {
 
     render() {
         const displayText = this.isHovering
-            ? this.viewMode === 'transcript'
-                ? 'Copy Transcript'
-                : 'Copy Glass Analysis'
-            : this.viewMode === 'insights'
-            ? `Live insights`
-            : `Glass is Listening ${this.elapsedTime}`;
+            ? 'Copy Transcript'
+            : this.isPaused
+                ? `Glass is Paused ${this.elapsedTime}`
+                : this.hasCompletedRecording
+                    ? `Conversation Transcript ${this.elapsedTime}`
+                    : `Glass is Listening ${this.elapsedTime}`;
 
         return html`
             <div class="assistant-container">
@@ -639,23 +599,6 @@ export class ListenView extends LitElement {
                         <span class="bar-left-text-content ${this.isAnimating ? 'slide-in' : ''}">${displayText}</span>
                     </div>
                     <div class="bar-controls">
-                        <button class="toggle-button" @click=${this.toggleViewMode}>
-                            ${this.viewMode === 'insights'
-                                ? html`
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" />
-                                          <circle cx="12" cy="12" r="3" />
-                                      </svg>
-                                      <span>Show Transcript</span>
-                                  `
-                                : html`
-                                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                          <path d="M9 11l3 3L22 4" />
-                                          <path d="M22 12v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-                                      </svg>
-                                      <span>Show Insights</span>
-                                  `}
-                        </button>
                         <button
                             class="copy-button ${this.copyState === 'copied' ? 'copied' : ''}"
                             @click=${this.handleCopy}
@@ -674,12 +617,12 @@ export class ListenView extends LitElement {
                 </div>
 
                 <stt-view 
-                    .isVisible=${this.viewMode === 'transcript'}
+                    .isVisible=${true}
                     @stt-messages-updated=${this.handleSttMessagesUpdated}
                 ></stt-view>
 
                 <summary-view 
-                    .isVisible=${this.viewMode === 'insights'}
+                    .isVisible=${false}
                     .hasCompletedRecording=${this.hasCompletedRecording}
                 ></summary-view>
             </div>

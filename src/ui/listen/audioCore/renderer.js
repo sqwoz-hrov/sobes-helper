@@ -17,10 +17,10 @@ window.api.renderer.onChangeListenCaptureState((_event, { status }) => {
         console.log('[Renderer] Non-listen view: ignoring capture-state change');
         return;
     }
-    if (status === "stop") {
-        console.log('[Renderer] Session ended – stopping local capture');
+    if (status === 'stop' || status === 'pause') {
+        console.log(`[Renderer] Session ${status === 'pause' ? 'paused' : 'ended'} – stopping local capture`);
         listenCapture.stopCapture();
-    } else {
+    } else if (status === 'start') {
         console.log('[Renderer] Session initialized – starting local capture');
         listenCapture.startCapture();
     }

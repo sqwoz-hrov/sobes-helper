@@ -3,6 +3,7 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 export class MainHeader extends LitElement {
     static properties = {
         isTogglingSession: { type: Boolean, state: true },
+        pendingSessionAction: { type: String, state: true },
         shortcuts: { type: Object, state: true },
         listenSessionStatus: { type: String, state: true },
     };
@@ -87,7 +88,7 @@ export class MainHeader extends LitElement {
             background: transparent;
             border-radius: 9000px;
             justify-content: center;
-            width: 78px;
+            min-width: 78px;
             align-items: center;
             gap: 6px;
             display: flex;
@@ -158,6 +159,13 @@ export class MainHeader extends LitElement {
 
         .listen-button.done::after {
             display: none;
+        }
+
+        .session-controls {
+            -webkit-app-region: no-drag;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .loading-dots {
@@ -348,6 +356,7 @@ export class MainHeader extends LitElement {
         this.hasSlidIn = false;
         this.settingsHideTimer = null;
         this.isTogglingSession = false;
+        this.pendingSessionAction = '';
         this.listenSessionStatus = 'beforeSession';
         this.animationEndTimer = null;
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
@@ -360,10 +369,30 @@ export class MainHeader extends LitElement {
     _getListenButtonText(status) {
         switch (status) {
             case 'beforeSession': return 'Listen';
-            case 'inSession'   : return 'Stop';
+            case 'inSession'   : return 'Pause';
+            case 'paused'      : return 'Continue';
             case 'afterSession': return 'Done';
             default            : return 'Listen';
         }
+    }
+
+    _statusFromSessionState(state) {
+        return ({
+            idle: 'beforeSession',
+            listening: 'inSession',
+            paused: 'paused',
+            stopped: 'afterSession',
+        })[state] || this.listenSessionStatus;
+    }
+
+    async _resizeForSessionControls() {
+        if (!window.api?.headerController) return;
+        const expanded = this.listenSessionStatus === 'inSession' || this.listenSessionStatus === 'paused';
+        const isContentProtectionOn = await window.api.common.getContentProtectionStatus().catch(() => true);
+        await window.api.headerController.resizeHeaderWindow({
+            width: expanded ? 456 : 353,
+            height: isContentProtectionOn ? 47 : 68,
+        }).catch(() => {});
     }
 
     async handleMouseDown(e) {
@@ -470,20 +499,20 @@ export class MainHeader extends LitElement {
     connectedCallback() {
         super.connectedCallback();
         this.addEventListener('animationend', this.handleAnimationEnd);
+        this._contentProtectionListener = () => this._resizeForSessionControls();
+        document.addEventListener('content-protection-indicator-changed', this._contentProtectionListener);
 
         if (window.api) {
 
-            this._sessionStateTextListener = (event, { success }) => {
-                if (success) {
-                    this.listenSessionStatus = ({
-                        beforeSession: 'inSession',
-                        inSession: 'afterSession',
-                        afterSession: 'beforeSession',
-                    })[this.listenSessionStatus] || 'beforeSession';
-                } else {
+            this._sessionStateTextListener = (event, { success, state }) => {
+                if (state) {
+                    this.listenSessionStatus = this._statusFromSessionState(state);
+                } else if (!success) {
                     this.listenSessionStatus = 'beforeSession';
                 }
-                this.isTogglingSession = false; // ✨ 로딩 상태만 해제
+                this.isTogglingSession = false;
+                this.pendingSessionAction = '';
+                this._resizeForSessionControls();
             };
             window.api.mainHeader.onListenChangeSessionResult(this._sessionStateTextListener);
 
@@ -498,6 +527,9 @@ export class MainHeader extends LitElement {
     disconnectedCallback() {
         super.disconnectedCallback();
         this.removeEventListener('animationend', this.handleAnimationEnd);
+        if (this._contentProtectionListener) {
+            document.removeEventListener('content-protection-indicator-changed', this._contentProtectionListener);
+        }
         
         if (this.animationEndTimer) {
             clearTimeout(this.animationEndTimer);
@@ -531,23 +563,32 @@ export class MainHeader extends LitElement {
         }
     }
 
-    async _handleListenClick() {
+    async _handleSessionAction(action) {
         if (this.wasJustDragged) return;
         if (this.isTogglingSession) {
             return;
         }
 
         this.isTogglingSession = true;
+        this.pendingSessionAction = action;
 
         try {
-            const listenButtonText = this._getListenButtonText(this.listenSessionStatus);
             if (window.api) {
-                await window.api.mainHeader.sendListenButtonClick(listenButtonText);
+                await window.api.mainHeader.sendListenButtonClick(action);
             }
         } catch (error) {
             console.error('IPC invoke for session change failed:', error);
             this.isTogglingSession = false;
+            this.pendingSessionAction = '';
         }
+    }
+
+    async _handleListenClick() {
+        await this._handleSessionAction(this._getListenButtonText(this.listenSessionStatus));
+    }
+
+    async _handleStopClick() {
+        await this._handleSessionAction('Stop');
     }
 
     async _handleAskClick() {
@@ -600,47 +641,54 @@ export class MainHeader extends LitElement {
 
     render() {
         const listenButtonText = this._getListenButtonText(this.listenSessionStatus);
-    
+        const showStopButton = this.listenSessionStatus === 'inSession' || this.listenSessionStatus === 'paused';
+        const showPauseIcon = listenButtonText === 'Pause';
+        const showDoneIcon = listenButtonText === 'Done';
+
         const buttonClasses = {
-            active: listenButtonText === 'Stop',
             done: listenButtonText === 'Done',
         };
-        const showStopIcon = listenButtonText === 'Stop' || listenButtonText === 'Done';
 
         return html`
             <div class="header" @mousedown=${this.handleMouseDown}>
-                <button 
-                    class="listen-button ${Object.keys(buttonClasses).filter(k => buttonClasses[k]).join(' ')}"
-                    @click=${this._handleListenClick}
-                    ?disabled=${this.isTogglingSession}
-                >
-                    ${this.isTogglingSession
-                        ? html`
-                            <div class="loading-dots">
-                                <span></span><span></span><span></span>
-                            </div>
-                        `
-                        : html`
-                            <div class="action-text">
-                                <div class="action-text-content">${listenButtonText}</div>
-                            </div>
-                            <div class="listen-icon">
-                                ${showStopIcon
-                                    ? html`
-                                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <rect width="9" height="9" rx="1" fill="white"/>
-                                        </svg>
-                                    `
-                                    : html`
-                                        <svg width="12" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <path d="M1.69922 2.7515C1.69922 2.37153 2.00725 2.0635 2.38722 2.0635H2.73122C3.11119 2.0635 3.41922 2.37153 3.41922 2.7515V8.2555C3.41922 8.63547 3.11119 8.9435 2.73122 8.9435H2.38722C2.00725 8.9435 1.69922 8.63547 1.69922 8.2555V2.7515Z" fill="white"/>
-                                            <path d="M5.13922 1.3755C5.13922 0.995528 5.44725 0.6875 5.82722 0.6875H6.17122C6.55119 0.6875 6.85922 0.995528 6.85922 1.3755V9.6315C6.85922 10.0115 6.55119 10.3195 6.17122 10.3195H5.82722C5.44725 10.3195 5.13922 10.0115 5.13922 9.6315V1.3755Z" fill="white"/>
-                                            <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
-                                        </svg>
-                                    `}
-                            </div>
-                        `}
-                </button>
+                <div class="session-controls">
+                    <button
+                        class="listen-button ${Object.keys(buttonClasses).filter(k => buttonClasses[k]).join(' ')}"
+                        @click=${this._handleListenClick}
+                        ?disabled=${this.isTogglingSession}
+                    >
+                        ${this.isTogglingSession && this.pendingSessionAction !== 'Stop'
+                            ? html`<div class="loading-dots"><span></span><span></span><span></span></div>`
+                            : html`
+                                <div class="action-text">
+                                    <div class="action-text-content">${listenButtonText}</div>
+                                </div>
+                                <div class="listen-icon">
+                                    ${showPauseIcon
+                                        ? html`<svg width="12" height="11" viewBox="0 0 12 11" fill="white"><rect x="2" y="1" width="3" height="9" rx="1"/><rect x="7" y="1" width="3" height="9" rx="1"/></svg>`
+                                        : showDoneIcon
+                                            ? html`<svg width="9" height="9" viewBox="0 0 9 9" fill="none"><rect width="9" height="9" rx="1" fill="white"/></svg>`
+                                            : html`
+                                                <svg width="12" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M1.69922 2.7515C1.69922 2.37153 2.00725 2.0635 2.38722 2.0635H2.73122C3.11119 2.0635 3.41922 2.37153 3.41922 2.7515V8.2555C3.41922 8.63547 3.11119 8.9435 2.73122 8.9435H2.38722C2.00725 8.9435 1.69922 8.63547 1.69922 8.2555V2.7515Z" fill="white"/>
+                                                    <path d="M5.13922 1.3755C5.13922 0.995528 5.44725 0.6875 5.82722 0.6875H6.17122C6.55119 0.6875 6.85922 0.995528 6.85922 1.3755V9.6315C6.85922 10.0115 6.55119 10.3195 6.17122 10.3195H5.82722C5.44725 10.3195 5.13922 10.0115 5.13922 9.6315V1.3755Z" fill="white"/>
+                                                    <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
+                                                </svg>`}
+                                </div>
+                            `}
+                    </button>
+
+                    ${showStopButton ? html`
+                        <button class="listen-button active" @click=${this._handleStopClick} ?disabled=${this.isTogglingSession}>
+                            ${this.isTogglingSession && this.pendingSessionAction === 'Stop'
+                                ? html`<div class="loading-dots"><span></span><span></span><span></span></div>`
+                                : html`
+                                    <div class="action-text"><div class="action-text-content">Stop</div></div>
+                                    <div class="listen-icon"><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><rect width="9" height="9" rx="1" fill="white"/></svg></div>
+                                `}
+                        </button>
+                    ` : ''}
+                </div>
 
                 <div class="header-actions ask-action" @click=${() => this._handleAskClick()}>
                     <div class="action-text">

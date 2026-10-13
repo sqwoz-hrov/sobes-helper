@@ -73,13 +73,19 @@ class SttService {
         }
     }
 
-    flushMyCompletion() {
+    async flushMyCompletion() {
         const finalText = (this.myCompletionBuffer + this.myCurrentUtterance).trim();
         if (!this.modelInfo || !finalText) return;
 
+        if (this.myCompletionTimer) clearTimeout(this.myCompletionTimer);
+        this.myCompletionBuffer = '';
+        this.myCompletionTimer = null;
+        this.myCurrentUtterance = '';
+
         // Notify completion callback
+        let completionPromise = null;
         if (this.onTranscriptionComplete) {
-            this.onTranscriptionComplete('Me', finalText);
+            completionPromise = this.onTranscriptionComplete('Me', finalText);
         }
         
         // Send to renderer as final
@@ -91,22 +97,26 @@ class SttService {
             timestamp: Date.now(),
         });
 
-        this.myCompletionBuffer = '';
-        this.myCompletionTimer = null;
-        this.myCurrentUtterance = '';
-        
         if (this.onStatusUpdate) {
             this.onStatusUpdate('Listening...');
         }
+
+        await completionPromise;
     }
 
-    flushTheirCompletion() {
+    async flushTheirCompletion() {
         const finalText = (this.theirCompletionBuffer + this.theirCurrentUtterance).trim();
         if (!this.modelInfo || !finalText) return;
+
+        if (this.theirCompletionTimer) clearTimeout(this.theirCompletionTimer);
+        this.theirCompletionBuffer = '';
+        this.theirCompletionTimer = null;
+        this.theirCurrentUtterance = '';
         
         // Notify completion callback
+        let completionPromise = null;
         if (this.onTranscriptionComplete) {
-            this.onTranscriptionComplete('Them', finalText);
+            completionPromise = this.onTranscriptionComplete('Them', finalText);
         }
         
         // Send to renderer as final
@@ -118,13 +128,18 @@ class SttService {
             timestamp: Date.now(),
         });
 
-        this.theirCompletionBuffer = '';
-        this.theirCompletionTimer = null;
-        this.theirCurrentUtterance = '';
-        
         if (this.onStatusUpdate) {
             this.onStatusUpdate('Listening...');
         }
+
+        await completionPromise;
+    }
+
+    async flushPendingCompletions() {
+        await Promise.all([
+            this.flushMyCompletion(),
+            this.flushTheirCompletion(),
+        ]);
     }
 
     debounceMyCompletion(text) {
@@ -788,4 +803,4 @@ class SttService {
     }
 }
 
-module.exports = SttService; 
+module.exports = SttService;

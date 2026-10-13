@@ -11,6 +11,7 @@ class SummaryService {
         this.analysisHistory = [];
         this.conversationHistory = [];
         this.currentSessionId = null;
+        this.analysisPromise = null;
         
         // Callbacks
         this.onAnalysisComplete = null;
@@ -302,23 +303,50 @@ Keep all points concise and build upon previous analysis if provided.`,
     /**
      * Triggers analysis when conversation history reaches 5 texts.
      */
-    async triggerAnalysisIfNeeded() {
-        if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
-            console.log(`Triggering analysis - ${this.conversationHistory.length} conversation texts accumulated`);
+    async generateAndPublishAnalysis() {
+        if (this.analysisPromise) {
+            await this.analysisPromise;
+        }
 
-            const data = await this.makeOutlineAndRequests(this.conversationHistory);
+        if (this.conversationHistory.length === 0) {
+            console.log('No conversation available for analysis');
+            return null;
+        }
+
+        const conversationSnapshot = [...this.conversationHistory];
+        const analysisPromise = this.makeOutlineAndRequests(conversationSnapshot);
+        this.analysisPromise = analysisPromise;
+
+        try {
+            const data = await analysisPromise;
             if (data) {
                 console.log('Sending structured data to renderer');
                 this.sendToRenderer('summary-update', data);
-                
-                // Notify callback
+
                 if (this.onAnalysisComplete) {
                     this.onAnalysisComplete(data);
                 }
             } else {
                 console.log('No analysis data returned');
             }
+            return data;
+        } finally {
+            if (this.analysisPromise === analysisPromise) {
+                this.analysisPromise = null;
+            }
         }
+    }
+
+    async triggerAnalysisIfNeeded() {
+        if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
+            console.log(`Triggering analysis - ${this.conversationHistory.length} conversation texts accumulated`);
+            await this.generateAndPublishAnalysis();
+        }
+    }
+
+    async forceAnalysis() {
+        console.log(`Forcing analysis at ${this.conversationHistory.length} conversation texts`);
+        return await this.generateAndPublishAnalysis();
     }
 
     getCurrentAnalysisData() {
@@ -330,4 +358,4 @@ Keep all points concise and build upon previous analysis if provided.`,
     }
 }
 
-module.exports = SummaryService; 
+module.exports = SummaryService;

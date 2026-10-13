@@ -7,6 +7,7 @@ const tests = [
     path.join('tests', 'context-screenshot-cache.test.js'),
     path.join('tests', 'context-sqlite-repository.test.js'),
     path.join('tests', 'gemini-context-history.test.js'),
+    path.join('tests', 'listen-pause-lifecycle.test.js'),
 ];
 
 const result = spawnSync(electronPath, ['--test', ...tests], {

@@ -12,6 +12,8 @@ class ListenService {
         this.summaryService = new SummaryService();
         this.currentSessionId = null;
         this.isInitializingSession = false;
+        this.sessionState = 'idle';
+        this.currentLanguage = 'ru';
 
         this.setupServiceCallbacks();
         console.log('[ListenService] Service instance created.');
@@ -21,7 +23,7 @@ class ListenService {
         // STT service callbacks
         this.sttService.setCallbacks({
             onTranscriptionComplete: (speaker, text) => {
-                this.handleTranscriptionComplete(speaker, text);
+                return this.handleTranscriptionComplete(speaker, text);
             },
             onStatusUpdate: (status) => {
                 this.sendToRenderer('update-status', status);
@@ -53,47 +55,61 @@ class ListenService {
         console.log('[ListenService] Initialized and ready.');
     }
 
-    async handleListenRequest(listenButtonText) {
+    async handleListenRequest(action) {
         const { windowPool } = require('../../window/windowManager');
-        const listenWindow = windowPool.get('listen');
         const header = windowPool.get('header');
 
         try {
-            switch (listenButtonText) {
+            switch (action) {
                 case 'Listen':
                     console.log('[ListenService] changeSession to "Listen"');
                     internalBridge.emit('window:requestVisibility', { name: 'listen', visible: true });
-                    await this.initializeSession();
-                    if (listenWindow && !listenWindow.isDestroyed()) {
-                        listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    if (!await this.initializeSession()) {
+                        throw new Error('Failed to initialize listen session');
                     }
                     break;
-        
+
+                case 'Pause':
+                    console.log('[ListenService] changeSession to "Pause"');
+                    await this.pauseSession();
+                    break;
+
+                case 'Continue':
+                    console.log('[ListenService] changeSession to "Continue"');
+                    await this.continueSession();
+                    break;
+
                 case 'Stop':
                     console.log('[ListenService] changeSession to "Stop"');
                     await this.closeSession();
-                    if (listenWindow && !listenWindow.isDestroyed()) {
-                        listenWindow.webContents.send('session-state-changed', { isActive: false });
-                    }
                     break;
-        
+
                 case 'Done':
                     console.log('[ListenService] changeSession to "Done"');
                     internalBridge.emit('window:requestVisibility', { name: 'listen', visible: false });
-                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    this.sessionState = 'idle';
+                    this.sendSessionState();
                     break;
-        
+
                 default:
-                    throw new Error(`[ListenService] unknown listenButtonText: ${listenButtonText}`);
+                    throw new Error(`[ListenService] unknown action: ${action}`);
             }
-            
-            header.webContents.send('listen:changeSessionResult', { success: true });
+
+            header.webContents.send('listen:changeSessionResult', { success: true, state: this.sessionState });
 
         } catch (error) {
             console.error('[ListenService] error in handleListenRequest:', error);
-            header.webContents.send('listen:changeSessionResult', { success: false });
+            header.webContents.send('listen:changeSessionResult', { success: false, state: this.sessionState });
             throw error; 
         }
+    }
+
+    sendSessionState() {
+        this.sendToRenderer('session-state-changed', {
+            state: this.sessionState,
+            isActive: this.sessionState === 'listening',
+            isPaused: this.sessionState === 'paused',
+        });
     }
 
     async handleTranscriptionComplete(speaker, text) {
@@ -154,6 +170,25 @@ class ListenService {
         }
     }
 
+    async initializeSttWithRetry(language) {
+        const MAX_RETRY = 10;
+        const RETRY_DELAY_MS = 300;
+
+        for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+            try {
+                await this.sttService.initializeSttSessions(language);
+                return true;
+            } catch (error) {
+                console.warn(`[ListenService] STT init attempt ${attempt} failed: ${error.message}`);
+                if (attempt < MAX_RETRY) {
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                }
+            }
+        }
+
+        return false;
+    }
+
     async initializeSession(language = 'ru') {
         if (this.isInitializingSession) {
             console.log('Session initialization already in progress.');
@@ -161,6 +196,7 @@ class ListenService {
         }
 
         this.isInitializingSession = true;
+        this.currentLanguage = language;
         this.sendToRenderer('session-initializing', true);
         this.sendToRenderer('update-status', 'Initializing sessions...');
 
@@ -171,32 +207,16 @@ class ListenService {
                 throw new Error('Failed to initialize database session');
             }
 
-            /* ---------- STT Initialization Retry Logic ---------- */
-            const MAX_RETRY = 10;
-            const RETRY_DELAY_MS = 300;   // 0.3 seconds
-
-            let sttReady = false;
-            for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-                try {
-                    await this.sttService.initializeSttSessions(language);
-                    sttReady = true;
-                    break;                         // Exit on success
-                } catch (err) {
-                    console.warn(
-                        `[ListenService] STT init attempt ${attempt} failed: ${err.message}`
-                    );
-                    if (attempt < MAX_RETRY) {
-                        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-                    }
-                }
-            }
+            const sttReady = await this.initializeSttWithRetry(language);
             if (!sttReady) throw new Error('STT init failed after retries');
-            /* ------------------------------------------- */
 
             console.log('✅ Listen service initialized successfully.');
-            
+
+            this.sessionState = 'listening';
             this.sendToRenderer('update-status', 'Connected. Ready to listen.');
-            
+            this.sendToRenderer('change-listen-capture-state', { status: 'start' });
+            this.sendSessionState();
+
             return true;
         } catch (error) {
             console.error('❌ Failed to initialize listen service:', error);
@@ -205,8 +225,41 @@ class ListenService {
         } finally {
             this.isInitializingSession = false;
             this.sendToRenderer('session-initializing', false);
-            this.sendToRenderer('change-listen-capture-state', { status: "start" });
         }
+    }
+
+    async pauseSession() {
+        if (this.sessionState !== 'listening' || !this.currentSessionId) {
+            throw new Error('Cannot pause because no listen session is active.');
+        }
+
+        this.sendToRenderer('change-listen-capture-state', { status: 'pause' });
+        await this.sttService.flushPendingCompletions();
+        await this.sttService.closeSessions();
+
+        this.sessionState = 'paused';
+        this.sendToRenderer('update-status', 'Paused.');
+        this.sendSessionState();
+
+        this.summaryService.forceAnalysis().catch(error => {
+            console.error('[ListenService] Failed to generate paused insight:', error);
+        });
+
+        return { success: true };
+    }
+
+    async continueSession() {
+        if (this.sessionState !== 'paused' || !this.currentSessionId) {
+            throw new Error('Cannot continue because the listen session is not paused.');
+        }
+
+        const sttReady = await this.initializeSttWithRetry(this.currentLanguage);
+        if (!sttReady) throw new Error('STT resume failed after retries');
+        this.sessionState = 'listening';
+        this.sendToRenderer('change-listen-capture-state', { status: 'start' });
+        this.sendToRenderer('update-status', 'Connected. Ready to listen.');
+        this.sendSessionState();
+        return { success: true };
     }
 
     async sendMicAudioContent(data, mimeType) {
@@ -247,6 +300,8 @@ class ListenService {
             // Reset state
             this.currentSessionId = null;
             this.summaryService.resetConversationHistory();
+            this.sessionState = 'stopped';
+            this.sendSessionState();
 
             console.log('Listen service session closed.');
             return { success: true };
