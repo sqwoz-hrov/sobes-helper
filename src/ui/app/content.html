@@ -80,6 +80,17 @@
                 background: transparent;
             }
 
+            html.content-protection-disabled::after {
+                content: '';
+                position: fixed;
+                inset: 0;
+                z-index: 2147483647;
+                border: 2px solid #ff3b30;
+                border-radius: 12px;
+                box-sizing: border-box;
+                pointer-events: none;
+            }
+
             body {
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             }

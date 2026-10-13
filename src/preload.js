@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('api', {
       quitApplication: () => ipcRenderer.invoke('quit-application'),
       openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
+    // Content protection indicator
+      getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
+      onContentProtectionChanged: (callback) => ipcRenderer.on('content-protection-changed', callback),
+      removeOnContentProtectionChanged: (callback) => ipcRenderer.removeListener('content-protection-changed', callback),
+
     // User state listener (used by multiple components)
       onUserStateChanged: (callback) => ipcRenderer.on('user-state-changed', callback),
       removeOnUserStateChanged: (callback) => ipcRenderer.removeListener('user-state-changed', callback),

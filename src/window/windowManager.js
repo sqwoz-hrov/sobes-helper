@@ -411,6 +411,7 @@ const setContentProtection = (status) => {
     windowPool.forEach(win => {
         if (win && !win.isDestroyed()) {
             win.setContentProtection(isContentProtectionOn);
+            win.webContents.send('content-protection-changed', isContentProtectionOn);
         }
     });
 };

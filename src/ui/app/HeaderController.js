@@ -2,6 +2,9 @@ import './MainHeader.js';
 import './ApiKeyHeader.js';
 import './PermissionHeader.js';
 import './WelcomeHeader.js';
+import { initializeContentProtectionIndicator } from './contentProtectionIndicator.js';
+
+initializeContentProtectionIndicator();
 
 class HeaderTransitionManager {
     constructor() {
@@ -18,6 +21,7 @@ class HeaderTransitionManager {
          */
         this.ensureHeader = (type) => {
             console.log('[HeaderController] ensureHeader: Ensuring header of type:', type);
+            document.documentElement.classList.toggle('main-header-active', type === 'main');
             if (this.currentHeaderType === type) {
                 console.log('[HeaderController] ensureHeader: Header of type:', type, 'already exists.');
                 return;
@@ -74,6 +78,12 @@ class HeaderTransitionManager {
         // WelcomeHeader 콜백 메서드들
         this.handleLoginOption = this.handleLoginOption.bind(this);
         this.handleApiKeyOption = this.handleApiKeyOption.bind(this);
+
+        document.addEventListener('content-protection-indicator-changed', (event) => {
+            if (this.currentHeaderType === 'main') {
+                this._resizeForMain(event.detail.isContentProtectionOn);
+            }
+        });
 
         this._bootstrap();
 
@@ -226,10 +236,11 @@ class HeaderTransitionManager {
         this.ensureHeader('main');
     }
 
-    async _resizeForMain() {
+    async _resizeForMain(isContentProtectionOn = !document.documentElement.classList.contains('content-protection-disabled')) {
         if (!window.api) return;
-        console.log('[HeaderController] _resizeForMain: Resizing window to 353x47');
-        return window.api.headerController.resizeHeaderWindow({ width: 353, height: 47 }).catch(() => {});
+        const height = isContentProtectionOn ? 47 : 68;
+        console.log(`[HeaderController] _resizeForMain: Resizing window to 353x${height}`);
+        return window.api.headerController.resizeHeaderWindow({ width: 353, height }).catch(() => {});
     }
 
     async _resizeForApiKey(height = 370) {

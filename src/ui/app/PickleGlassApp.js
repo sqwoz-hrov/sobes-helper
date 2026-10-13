@@ -3,8 +3,11 @@ import { SettingsView } from '../settings/SettingsView.js';
 import { ListenView } from '../listen/ListenView.js';
 import { AskView } from '../ask/AskView.js';
 import { ShortcutSettingsView } from '../settings/ShortCutSettingsView.js';
+import { initializeContentProtectionIndicator } from './contentProtectionIndicator.js';
 
 import '../listen/audioCore/renderer.js';
+
+initializeContentProtectionIndicator();
 
 export class PickleGlassApp extends LitElement {
     static styles = css`
