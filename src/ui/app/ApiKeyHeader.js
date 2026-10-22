@@ -436,7 +436,6 @@ export class ApiKeyHeader extends LitElement {
             const sttProviders = [];
 
             for (const id in config) {
-                // 'openai-glass' 같은 가상 Provider는 UI에 표시하지 않음
                 if (id.includes('-glass')) continue;
                 const hasLlmModels = config[id].llmModels.length > 0 || id === 'ollama';
                 const hasSttModels = config[id].sttModels.length > 0 || id === 'whisper';

@@ -482,7 +482,6 @@ export class SettingsView extends LitElement {
     //////// after_modelStateService ////////
     static properties = {
         shortcuts: { type: Object, state: true },
-        firebaseUser: { type: Object, state: true },
         isLoading: { type: Boolean, state: true },
         isContentProtectionOn: { type: Boolean, state: true },
         saving: { type: Boolean, state: true },
@@ -512,7 +511,6 @@ export class SettingsView extends LitElement {
         super();
         //////// after_modelStateService ////////
         this.shortcuts = {};
-        this.firebaseUser = null;
         this.apiKeys = { openai: '', gemini: '', anthropic: '', whisper: '' };
         this.providerConfig = {};
         this.isLoading = true;
@@ -534,7 +532,7 @@ export class SettingsView extends LitElement {
         // Whisper related
         this.whisperModels = [];
         this.whisperProgressTracker = null; // Will be initialized when needed
-        this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
+        this.handleLogin = this.handleLogin.bind(this)
         this.autoUpdateEnabled = true;
         this.autoUpdateLoading = true;
         this.loadInitialData();
@@ -613,15 +611,13 @@ export class SettingsView extends LitElement {
         this.isLoading = true;
         try {
             // Load essential data first
-            const [userState, modelSettings, presets, contentProtection, shortcuts] = await Promise.all([
-                window.api.settingsView.getCurrentUser(),
+            const [modelSettings, presets, contentProtection, shortcuts] = await Promise.all([
                 window.api.settingsView.getModelSettings(), // Facade call
                 window.api.settingsView.getPresets(),
                 window.api.settingsView.getContentProtectionStatus(),
                 window.api.settingsView.getCurrentShortcuts()
             ]);
             
-            if (userState && userState.isLoggedIn) this.firebaseUser = userState;
             
             if (modelSettings.success) {
                 const { config, storedKeys, availableLlm, availableStt, selectedModels } = modelSettings.data;
@@ -898,12 +894,12 @@ export class SettingsView extends LitElement {
     }
 
 
-    handleUsePicklesKey(e) {
+    handleLogin(e) {
         e.preventDefault()
         if (this.wasJustDragged) return
     
-        console.log("Requesting Firebase authentication from main process...")
-        window.api.settingsView.startFirebaseAuth();
+        console.log("Opening sign-in placeholder...")
+        window.api.settingsView.startAuth();
     }
     //////// after_modelStateService ////////
 
@@ -952,13 +948,8 @@ export class SettingsView extends LitElement {
         
         this._userStateListener = (event, userState) => {
             console.log('[SettingsView] Received user-state-changed:', userState);
-            if (userState && userState.isLoggedIn) {
-                this.firebaseUser = userState;
-            } else {
-                this.firebaseUser = null;
-            }
             this.loadAutoUpdateSetting();
-            // Reload model settings when user state changes (Firebase login/logout)
+            // Reload model settings when user state changes (local account state)
             this.loadInitialData();
         };
         
@@ -1144,11 +1135,6 @@ export class SettingsView extends LitElement {
         window.api.settingsView.quitApplication();
     }
 
-    handleFirebaseLogout() {
-        console.log('Firebase Logout clicked');
-        window.api.settingsView.firebaseLogout();
-    }
-
     async handleOllamaShutdown() {
         console.log('[SettingsView] Shutting down Ollama service...');
         
@@ -1190,12 +1176,10 @@ export class SettingsView extends LitElement {
             `;
         }
 
-        const loggedIn = !!this.firebaseUser;
 
         const apiKeyManagementHTML = html`
             <div class="api-key-section">
                 ${Object.entries(this.providerConfig)
-                    .filter(([id, config]) => !id.includes('-glass'))
                     .map(([id, config]) => {
                         if (id === 'ollama') {
                             // Special UI for Ollama
@@ -1254,7 +1238,7 @@ export class SettingsView extends LitElement {
                         <div class="provider-key-group">
                             <label for="key-input-${id}">${config.name} API Key</label>
                             <input type="password" id="key-input-${id}"
-                                placeholder=${loggedIn ? "Using Pickle's Key" : `Enter ${config.name} API Key`} 
+                                placeholder=${`Enter ${config.name} API Key`}
                                 .value=${this.apiKeys[id] || ''}
                             >
                             <div class="key-buttons">
@@ -1354,10 +1338,7 @@ export class SettingsView extends LitElement {
                     <div>
                         <h1 class="app-title">Pickle Glass</h1>
                         <div class="account-info">
-                            ${this.firebaseUser
-                                ? html`Account: ${this.firebaseUser.email || 'Logged In'}`
-                                : `Account: Not Logged In`
-                            }
+                            Local mode
                         </div>
                     </div>
                     <div class="invisibility-icon ${this.isContentProtectionOn ? 'visible' : ''}" title="Invisibility is On">
@@ -1439,18 +1420,9 @@ export class SettingsView extends LitElement {
                     </button>
                     
                     <div class="bottom-buttons">
-                        ${this.firebaseUser
-                            ? html`
-                                <button class="settings-button half-width danger" @click=${this.handleFirebaseLogout}>
-                                    <span>Logout</span>
-                                </button>
-                                `
-                            : html`
-                                <button class="settings-button half-width" @click=${this.handleUsePicklesKey}>
-                                    <span>Login</span>
-                                </button>
-                                `
-                        }
+                        <button class="settings-button half-width" @click=${this.handleLogin}>
+                            <span>Login</span>
+                        </button>
                         <button class="settings-button half-width danger" @click=${this.handleQuit}>
                             <span>Quit</span>
                         </button>

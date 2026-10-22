@@ -9,7 +9,8 @@ router.get('/status', async (req, res) => {
             return res.status(500).json({ error: 'Default user not initialized' });
         }
         res.json({ 
-            authenticated: true, 
+            authenticated: false,
+            mode: 'local',
             user: {
                 id: user.uid,
                 name: user.display_name

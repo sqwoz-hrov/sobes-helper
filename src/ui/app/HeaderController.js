@@ -158,7 +158,7 @@ class HeaderTransitionManager {
     async handleLoginOption() {
         console.log('[HeaderController] Login option selected');
         if (window.api) {
-            await window.api.common.startFirebaseAuth();
+            await window.api.common.startAuth();
         }
     }
 
@@ -211,19 +211,7 @@ class HeaderTransitionManager {
             }
         }
 
-        let initialHeight = 220;
-        if (window.api) {
-            try {
-                const userState = await window.api.common.getCurrentUser();
-                if (userState.mode === 'firebase') {
-                    initialHeight = 280;
-                }
-            } catch (e) {
-                console.error('Could not get user state for resize', e);
-            }
-        }
-
-        await this._resizeForPermissionHeader(initialHeight);
+        await this._resizeForPermissionHeader(220);
         this.ensureHeader('permission');
     }
 

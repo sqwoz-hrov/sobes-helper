@@ -1,5 +1,4 @@
 const sqliteRepository = require('./sqlite.repository');
-const firebaseRepository = require('./firebase.repository');
 
 let authService = null;
 
@@ -11,21 +10,13 @@ function getAuthService() {
 }
 
 function getBaseRepository() {
-    const service = getAuthService();
-    if (!service) {
-        throw new Error('AuthService could not be loaded for the user repository.');
-    }
-    const user = service.getCurrentUser();
-    if (user && user.isLoggedIn) {
-        return firebaseRepository;
-    }
     return sqliteRepository;
 }
 
 const userRepositoryAdapter = {
     findOrCreate: (user) => {
-        // This function receives the full user object, which includes the uid. No need to inject.
-        return getBaseRepository().findOrCreate(user);
+        // All profile operations belong to the local user.
+        return getBaseRepository().findOrCreate({ ...user, uid: getAuthService().getCurrentUserId() });
     },
     
     getById: () => {
@@ -37,7 +28,7 @@ const userRepositoryAdapter = {
 
     update: (updateData) => {
         const uid = getAuthService().getCurrentUserId();
-        return getBaseRepository().update({ uid, ...updateData });
+        return getBaseRepository().update({ ...updateData, uid });
     },
 
     deleteById: () => {

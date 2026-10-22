@@ -62,7 +62,9 @@ npm run setup
 
 <img width="100%" alt="booking-screen" src="./public/assets/01.gif">
 
-### Use your own API key, or sign up to use ours (free)
+### Use your own API key or local models
+
+History, transcripts, summaries, presets, and preferences are stored locally in SQLite. The dashboard is served by the desktop app through Express. Sign-in is currently a placeholder; configure your own API keys or use Ollama and Whisper.
 
 <img width="100%" alt="booking-screen" src="./public/assets/02.gif">
 
@@ -125,7 +127,7 @@ We have a list of [help wanted](https://github.com/pickle-com/glass/issues?q=is%
 - Jul 6: Full code refactoring has done.
 - Jul 7: Now support Claude, LLM/STT model selection
 - Jul 8: Now support Windows(beta), Improved AEC by Rust(to seperate mic/system audio), shortcut editing(beta)
-- Jul 8: Now support Local LLM & STT, Firebase Data Storage 
+- Jul 8: Now support Local LLM & STT
 
 
 ## About Pickle

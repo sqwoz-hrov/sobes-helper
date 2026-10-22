@@ -32,14 +32,6 @@ function createApp(eventBridge) {
     app.use('/api/conversations', require('./routes/conversations'));
     app.use('/api/presets', require('./routes/presets'));
 
-    app.get('/api/sync/status', (req, res) => {
-        res.json({
-            status: 'online',
-            timestamp: new Date().toISOString(),
-            version: '1.0.0'
-        });
-    });
-
     app.post('/api/desktop/set-user', (req, res) => {
         res.json({
             success: true,

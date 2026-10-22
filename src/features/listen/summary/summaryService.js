@@ -143,8 +143,6 @@ Keep all points concise and build upon previous analysis if provided.`,
                 model: modelInfo.model,
                 temperature: 0.7,
                 maxTokens: 1024,
-                usePortkey: modelInfo.provider === 'openai-glass',
-                portkeyVirtualKey: modelInfo.provider === 'openai-glass' ? modelInfo.apiKey : undefined,
             });
 
             const completion = await llm.chat(messages);

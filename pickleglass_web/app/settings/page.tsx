@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Check, ExternalLink, Cloud, HardDrive } from 'lucide-react'
+import { HardDrive } from 'lucide-react'
 import { useAuth } from '@/utils/auth'
 import { 
   UserProfile,
@@ -10,7 +10,6 @@ import {
   checkApiKeyStatus,
   saveApiKey,
   deleteAccount,
-  logout
 } from '@/utils/api'
 import { useRouter } from 'next/navigation'
 
@@ -20,13 +19,11 @@ declare global {
   }
 }
 
-type Tab = 'profile' | 'privacy' | 'billing'
-type BillingCycle = 'monthly' | 'annually'
+type Tab = 'profile' | 'privacy'
 
 export default function SettingsPage() {
-  const { user: userInfo, isLoading, mode } = useAuth()
+  const { user: userInfo, isLoading } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('profile')
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly')
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [hasApiKey, setHasApiKey] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
@@ -88,12 +85,10 @@ export default function SettingsPage() {
     return null
   }
 
-  const isFirebaseMode = mode === 'firebase'
 
   const tabs = [
     { id: 'profile' as Tab, name: 'Personal Profile', href: '/settings' },
     { id: 'privacy' as Tab, name: 'Data & Privacy', href: '/settings/privacy' },
-    { id: 'billing' as Tab, name: 'Billing', href: '/settings/billing' },
   ]
 
   const handleSaveApiKey = async () => {
@@ -126,10 +121,8 @@ export default function SettingsPage() {
   }
 
   const handleDeleteAccount = async () => {
-    const confirmMessage = isFirebaseMode
-      ? "Are you sure you want to delete your account? This action cannot be undone and all data stored in Firebase will be deleted."
-      : "Are you sure you want to delete your account? This action cannot be undone and all data will be deleted."
-    
+    const confirmMessage = "Delete the local profile and its saved history and presets? This cannot be undone."
+
     if (window.confirm(confirmMessage)) {
       try {
         await deleteAccount()
@@ -140,242 +133,21 @@ export default function SettingsPage() {
     }
   }
 
-  const handleLogout = async () => {
-    try {
-      await logout()
-    } catch (error) {
-      console.error("Logout failed:", error)
-    }
-  }
-
-  const renderBillingContent = () => (
-    <div className="space-y-8">
-      <div className={`p-4 rounded-lg border ${isFirebaseMode ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-        <div className="flex items-center gap-2 mb-2">
-          {isFirebaseMode ? (
-            <Cloud className="h-5 w-5 text-blue-600" />
-          ) : (
-            <HardDrive className="h-5 w-5 text-gray-600" />
-          )}
-          <h3 className={`font-semibold ${isFirebaseMode ? 'text-blue-900' : 'text-gray-900'}`}>
-            {isFirebaseMode ? 'Firebase Hosting Mode' : 'Local Execution Mode'}
-          </h3>
-        </div>
-        <p className={`text-sm ${isFirebaseMode ? 'text-blue-700' : 'text-gray-700'}`}>
-          {isFirebaseMode 
-            ? 'All data is safely stored and synchronized in Firebase Cloud.'
-            : 'Data is stored in local database and you can use personal API keys.'
-          }
-        </p>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => setBillingCycle('monthly')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            billingCycle === 'monthly'
-              ? 'bg-gray-200 text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Monthly
-        </button>
-        <button
-          onClick={() => setBillingCycle('annually')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            billingCycle === 'annually'
-              ? 'bg-gray-200 text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Annually
-        </button>
-      </div>
-
-      <div className="grid grid-cols-3 gap-6">
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="mb-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Free</h3>
-            <div className="text-3xl font-bold text-gray-900">
-              $0<span className="text-lg font-normal text-gray-600">/month</span>
-            </div>
-          </div>
-          
-          <p className="text-gray-600 mb-6">
-            Experience how Pickle Glass works with unlimited responses.
-          </p>
-          
-          <ul className="space-y-3 mb-8">
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Daily unlimited responses</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Unlimited access to free models</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Unlimited text output</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Screen viewing, audio listening</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Custom system prompts</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Community support only</span>
-            </li>
-          </ul>
-          
-          <button className="w-full py-2 px-4 bg-gray-200 text-gray-700 rounded-md font-medium">
-            Current Plan
-          </button>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-lg p-6 opacity-60">
-          <div className="mb-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Pro</h3>
-            <div className="text-3xl font-bold text-gray-900">
-              $25<span className="text-lg font-normal text-gray-600">/month</span>
-            </div>
-          </div>
-          
-          <p className="text-gray-600 mb-6">
-            Use latest models, get full response output, and work with custom prompts.
-          </p>
-          
-          <ul className="space-y-3 mb-8">
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Unlimited pro responses</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Unlimited access to latest models</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Full access to conversation dashboard</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">Priority support</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-500" />
-              <span className="text-sm text-gray-700">All features from free plan</span>
-            </li>
-          </ul>
-          
-          <button className="w-full py-2 px-4 bg-cyan-400 text-white rounded-md font-medium">
-            Coming Soon
-          </button>
-        </div>
-
-        <div className="bg-gray-800 text-white rounded-lg p-6 opacity-60">
-          <div className="mb-6">
-            <h3 className="text-xl font-semibold mb-2">Enterprise</h3>
-            <div className="text-xl font-semibold">Custom</div>
-          </div>
-          
-          <p className="text-gray-300 mb-6">
-            Specially crafted for teams that need complete customization.
-          </p>
-          
-          <ul className="space-y-3 mb-8">
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Custom integrations</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">User provisioning & role-based access</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Advanced post-call analytics</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Single sign-on</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Advanced security features</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Centralized billing</span>
-            </li>
-            <li className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-400" />
-              <span className="text-sm text-gray-300">Usage analytics & reporting dashboard</span>
-            </li>
-          </ul>
-          
-          <button className="w-full py-2 px-4 bg-gray-600 text-white rounded-md font-medium">
-            Coming Soon
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-        <div className="flex items-center gap-3">
-          <Check className="h-6 w-6 text-green-600" />
-          <div>
-            <h4 className="font-semibold text-green-900">All features are currently free!</h4>
-            <p className="text-green-700 text-sm">
-              {isFirebaseMode 
-                ? 'Enjoy all Pickle Glass features for free in Firebase hosting mode. Pro and Enterprise plans will be released soon with additional premium features.'
-                : 'Enjoy all Pickle Glass features for free in local mode. You can use personal API keys or continue using the free system.'
-              }
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'billing':
-        return renderBillingContent()
       case 'profile':
         return (
           <div className="space-y-6">
-            <div className={`p-4 rounded-lg border ${isFirebaseMode ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+            <div className="p-4 rounded-lg border bg-gray-50 border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  {isFirebaseMode ? (
-                    <Cloud className="h-5 w-5 text-blue-600" />
-                  ) : (
-                    <HardDrive className="h-5 w-5 text-gray-600" />
-                  )}
+                  <HardDrive className="h-5 w-5 text-gray-600" />
                   <div>
-                    <h3 className={`font-semibold ${isFirebaseMode ? 'text-blue-900' : 'text-gray-900'}`}>
-                      {isFirebaseMode ? 'Firebase Hosting Mode' : 'Local Execution Mode'}
-                    </h3>
-                    <p className={`text-sm ${isFirebaseMode ? 'text-blue-700' : 'text-gray-700'}`}>
-                      {isFirebaseMode 
-                        ? `Logged in with Google account (${userInfo.email})`
-                        : 'Running as local user'
-                      }
-                    </p>
+                    <h3 className="font-semibold text-gray-900">Local mode</h3>
+                    <p className="text-sm text-gray-700">History, presets, and preferences are stored on this device.</p>
                   </div>
                 </div>
-                {isFirebaseMode && (
-                  <button
-                    onClick={handleLogout}
-                    className="px-3 py-1 text-sm text-blue-600 hover:text-blue-700 underline"
-                  >
-                    Logout
-                  </button>
-                )}
+                <a href="/login" className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900 underline">Sign in</a>
               </div>
             </div>
 
@@ -404,11 +176,10 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {!isFirebaseMode && (
               <div className="bg-white border border-gray-200 rounded-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-1">API Key</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  If you want to use your own LLM API key, you can add it here. It will be used for all requests made by the local application.
+                  Add your OpenAI API key here. Configure other providers and local models in the desktop app.
                 </p>
                 
                 <div className="max-w-sm">
@@ -428,7 +199,7 @@ export default function SettingsPage() {
                   {hasApiKey ? (
                     <p className="text-xs text-green-600 mt-2">API key is currently set.</p>
                   ) : (
-                    <p className="text-xs text-gray-500 mt-2">No API key set. Using free system.</p>
+                    <p className="text-xs text-gray-500 mt-2">Configure an API key or a local model in the desktop app.</p>
                   )}
                 </div>
 
@@ -442,16 +213,12 @@ export default function SettingsPage() {
                     </button>
                 </div>
               </div>
-            )}
 
-            {(isFirebaseMode || (!isFirebaseMode && !hasApiKey)) && (
+            {!hasApiKey && (
                <div className="bg-white border border-red-300 rounded-lg p-6">
-                 <h3 className="text-lg font-semibold text-gray-900 mb-1">Delete Account</h3>
+                 <h3 className="text-lg font-semibold text-gray-900 mb-1">Delete Local Profile</h3>
                  <p className="text-sm text-gray-600 mb-4">
-                   {isFirebaseMode 
-                     ? 'Permanently remove your Firebase account and all content. This action cannot be undone, so please proceed carefully.'
-                     : 'Permanently remove your personal account and all content from the Pickle Glass platform. This action cannot be undone, so please proceed carefully.'
-                   }
+                   Delete the local profile and its saved history and presets from this device.
                  </p>
                  <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
                     <button
@@ -468,7 +235,7 @@ export default function SettingsPage() {
       case 'privacy':
         return null
       default:
-        return renderBillingContent()
+        return null
     }
   }
 

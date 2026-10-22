@@ -26,7 +26,7 @@ const AUTH_TAG_LENGTH = 16;
  * If keytar is available, it saves the new key.
  * Otherwise, it uses an in-memory key for the session.
  *
- * @param {string} userId - The unique identifier for the user (e.g., Firebase UID).
+ * @param {string} userId - The unique identifier for the user (the local profile ID).
  */
 async function initializeKey(userId) {
     if (!userId) {

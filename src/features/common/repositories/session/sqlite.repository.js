@@ -116,7 +116,7 @@ function getOrCreateActive(uid, requestedType = 'ask') {
 function endAllActiveSessions(uid) {
     const db = sqliteClient.getDb();
     const now = Math.floor(Date.now() / 1000);
-    // Filter by uid to match the Firebase repository's behavior.
+    // Restrict sessions to the local profile.
     const query = `UPDATE sessions SET ended_at = ?, updated_at = ? WHERE ended_at IS NULL AND uid = ?`;
     
     try {
