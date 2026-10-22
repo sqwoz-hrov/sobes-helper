@@ -28,6 +28,7 @@ function getAll() {
 
 function upsert(provider, settings) {
     // Validate: prevent direct setting of active status
+    // FIXME: False positive every time bro
     if (settings.is_active_llm || settings.is_active_stt) {
         console.warn('[ProviderSettings] Warning: is_active_llm/is_active_stt should not be set directly. Use setActiveProvider() instead.');
     }
